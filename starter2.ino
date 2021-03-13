@@ -19,7 +19,13 @@
 // }
 
 #include "pins.h"
+
+//Joystick Direction Enum
+enum Direction {Centre, North, NorthEast, East, SouthEast, South, SouthWest, West, NorthWest};
+
+
 // Other constants
+
 const uint32_t STEP_SIZES [] = {/*C*/ 51076057, /*C#*/ 54113197, /*D */ 57330935, 
                                /*D#*/ 60740010, /*E */ 64351798, /*F */ 68178356,
                                /*F#*/ 72232452, /*G */ 76527617, /*G#*/ 81078186, 
@@ -44,6 +50,11 @@ QueueHandle_t msg_out_q;
 
 // one-hot encoded value
 volatile uint32_t pressed_keys = 0;
+
+// joystick positions and direction
+volatile uint16_t joyX = 0;
+volatile uint16_t joyY = 0;
+volatile Direction joyDir = Centre;
 
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
@@ -150,6 +161,23 @@ void scanKeysTask(void * pvParameters){
     }
 }
 
+/// Helper function to get the direction of the joystick to display
+/// it. Will not be used in production, for debug use only.
+String getDirectionName(Direction dir){
+  switch(dir){
+    case North: return "N";
+    case East: return "E";
+    case South: return "S";
+    case West: return "W";
+    case NorthEast: return "NE";
+    case NorthWest: return "NW";
+    case SouthEast: return "SE";
+    case SouthWest: return "SW";
+    case Centre: return "C";
+    default: return "Oof";
+  }
+}
+
 void displayUpdateTask(void * pvParameters){
     uint8_t local_pressed_keys = 0;
     uint8_t local_knob_3_pos;
@@ -165,9 +193,12 @@ void displayUpdateTask(void * pvParameters){
         memcpy( local_note_message, (const uint8_t*) note_message, 3);
         local_knob_3_pos = knob_3_pos;
         xSemaphoreGive(key_array_mutex);
-
+        String direction_text = getDirectionName(joyDir);
+        
         // operate on display
         u8g2.clearBuffer();         // clear the internal memory
+        u8g2.setCursor(2,10);
+        u8g2.print(direction_text);
         // read key and print
         // -----------------------------------------------------------------
         for (uint8_t i = 0; i < 12; i++){
@@ -179,7 +210,8 @@ void displayUpdateTask(void * pvParameters){
         // -----------------------------------------------------------------
 
         u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
-        u8g2.drawStr(2,10,"Hello World!");  // write something to the internal memory
+        //u8g2.drawStr(2,10,"Hello World!");  // write something to the internal memory
+        
         u8g2.setCursor(20, 20);
         u8g2.print(local_knob_3_pos);
         u8g2.setCursor(64, 30);
@@ -251,6 +283,38 @@ inline uint8_t decodeKnobChange(const uint8_t& state, const uint8_t& past_change
     }
 }
 
+/// Updates the global position of the joystick
+void joystickTask(void * pvParameters){
+  // Assuming that at a stationary position:
+  // X = 552
+  // Y = 514
+  // Might clean up calculations later
+  const TickType_t xFrequency = 150/portTICK_PERIOD_MS;
+  TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
+
+  while(1){
+    vTaskDelayUntil( &xLastWakeTime, xFrequency );
+    uint16_t localX = analogRead(JOYX_PIN);
+    uint16_t localY = analogRead(JOYY_PIN);
+    Direction localDir;
+
+    if(localX < 300 && localY < 350) {localDir = NorthEast;}
+    else if(localX < 300 && localY > 650) {localDir = SouthEast;}
+    else if(localX > 700 && localY > 650) {localDir = SouthWest;}
+    else if(localX > 700 && localY < 350) {localDir = NorthWest;}
+    else if(localX < 300) {localDir = East;}
+    else if(localX > 700) {localDir = West;}
+    else if(localY < 250) {localDir = North;}
+    else if(localY > 650) {localDir = South;}
+    else {localDir = Centre;}
+
+    __atomic_store_n( &joyX, localX, __ATOMIC_RELAXED);
+    __atomic_store_n( &joyY, localY, __ATOMIC_RELAXED);
+    __atomic_store_n( &joyDir, localDir, __ATOMIC_RELAXED);
+
+  }
+}
+
 
 void setup() {
     // put your setup code here, to run once:
@@ -293,6 +357,9 @@ void setup() {
 
     TaskHandle_t serialDecoderHandle = NULL;
     xTaskCreate( serialDecoderTask, "serialDecoder", 64, NULL, 3, &serialDecoderHandle );
+
+    TaskHandle_t joystickHandle = NULL;
+    xTaskCreate(joystickTask, "joystick", 32, NULL, 3, &joystickHandle);
 
     // declare mutexes and other structures
     key_array_mutex = xSemaphoreCreateMutex(); // could use xSemaphoreCreateMutexStatic for it to be faster
