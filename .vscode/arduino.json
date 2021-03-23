@@ -1,0 +1,6 @@
+{
+    "configuration": "pnum=NUCLEO_L432KC,upload_method=MassStorage,xserial=generic,usb=none,xusb=FS,opt=osstd,rtlib=nano",
+    "board": "STM32:stm32:Nucleo_32",
+    "port": "COM3",
+    "sketch": "starter2.ino"
+}
