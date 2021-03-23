@@ -68,7 +68,11 @@ void sampleISR(){
     while (buff_ptr >= 0xC800000000){ // check if >= 200 <<32
         buff_ptr -= 0xC800000000;
     }
-    analogWrite(OUTR_PIN, (SINE_WAVE_110_HZ[ buff_ptr >> 32 ] >> 24) >> (8 - knob_3_pos/4));
+    bool muteL = __atomic_load_n( &mute, __ATOMIC_RELAXED);
+    if( !muteL ){
+        analogWrite(OUTR_PIN, (SINE_WAVE_110_HZ[ buff_ptr >> 32 ] >> 24) >> (8 - knob_3_pos/4));
+    }
+    
 }
 
 // reads all bits in a certain row of the pin matrix
@@ -98,6 +102,7 @@ void scanKeysTask(void * pvParameters){
     const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
     uint8_t pressed_key_index_last = -1;
+    uint8_t prev_knob3_press=0;
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
         // read rows ----------------------------------------------------------
@@ -119,6 +124,16 @@ void scanKeysTask(void * pvParameters){
         reading = ~reading;
         __atomic_store_n( &pressed_keys, reading, __ATOMIC_RELAXED);
         // reading = onehot-encoded value with active keys = 1  ---------------
+
+        //update mute. knob 3 press is mute and unmute
+        uint8_t knob3_press = (reading >> 21) & 0b1;
+        if(prev_knob3_press==1){
+            if(knob3_press==0){
+                bool local_mute = __atomic_load_n( &mute, __ATOMIC_RELAXED);
+                __atomic_store_n( &mute, !local_mute, __ATOMIC_RELAXED);
+            }
+        }
+        prev_knob3_press = knob3_press;
 
         // update knob 3 readings----------------------------------------------
         knob_3_internal = (reading >> 12) & 0b11;
@@ -186,13 +201,22 @@ void displayUpdateTask(void * pvParameters){
                 break;
             }
         }
+
+        //display mute
+        bool local_mute = __atomic_load_n( &mute, __ATOMIC_RELAXED);
+        if(local_mute){
+            u8g2.drawStr(20,20,"MUTE");
+        }else{
+            u8g2.drawStr(20,20,"UNMUTE");
+        }
+
         // -----------------------------------------------------------------
 
         
         u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
         
         //u8g2.drawStr(2,10,"S");  // write something to the internal memory
-        u8g2.setCursor(20, 20);
+        u8g2.setCursor(5, 20);
         u8g2.print(local_knob_3_pos>>1);
         u8g2.setCursor(2,10);
         u8g2.print(local_pressed_keys,BIN);
