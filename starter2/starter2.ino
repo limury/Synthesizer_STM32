@@ -38,6 +38,7 @@ volatile uint64_t increment = 0;
 volatile uint8_t knob_3_pos = 0;
 volatile uint32_t current_step_size = 0;
 volatile SemaphoreHandle_t key_array_mutex;
+volatile bool mute = false;
 
 volatile char note_message[] = "xxx";
 QueueHandle_t msg_out_q;
@@ -100,14 +101,21 @@ void scanKeysTask(void * pvParameters){
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
         // read rows ----------------------------------------------------------
-        setRow(3); delayMicroseconds(3);
+        setRow(6); delayMicroseconds(3);
         reading = readCols();
+        /*
         setRow(2); delayMicroseconds(3);
         reading = (reading << 4) + readCols();
         setRow(1); delayMicroseconds(3);
         reading = (reading << 4) + readCols();
         setRow(0); delayMicroseconds(3);
         reading = (reading << 4) + readCols();
+        */
+        for(int i = 5; i >=0  ; i--){
+            setRow(i); 
+            delayMicroseconds(3);
+            reading = (reading << 4) + readCols();
+        }
         reading = ~reading;
         __atomic_store_n( &pressed_keys, reading, __ATOMIC_RELAXED);
         // reading = onehot-encoded value with active keys = 1  ---------------
@@ -151,7 +159,7 @@ void scanKeysTask(void * pvParameters){
 }
 
 void displayUpdateTask(void * pvParameters){
-    uint8_t local_pressed_keys = 0;
+    uint32_t local_pressed_keys = 0;
     uint8_t local_knob_3_pos;
     char local_note_message[3];
 
@@ -173,15 +181,21 @@ void displayUpdateTask(void * pvParameters){
         for (uint8_t i = 0; i < 12; i++){
             if ( (local_pressed_keys >> i) & 0b1 ){
                 u8g2.drawStr(2,30, NOTE_NAMES[ i ]);
+                u8g2.setCursor(22,30);
+                u8g2.print(i);
                 break;
             }
         }
         // -----------------------------------------------------------------
 
+        
         u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
-        u8g2.drawStr(2,10,"SHAF");  // write something to the internal memory
+        
+        //u8g2.drawStr(2,10,"S");  // write something to the internal memory
         u8g2.setCursor(20, 20);
         u8g2.print(local_knob_3_pos>>1);
+        u8g2.setCursor(2,10);
+        u8g2.print(local_pressed_keys,BIN);
         u8g2.setCursor(64, 30);
         u8g2.print((char*) note_message);
         u8g2.sendBuffer();          // transfer internal memory to the display
