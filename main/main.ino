@@ -78,9 +78,14 @@ namespace DMA {
                 phaseAcc += increment;
                 // DMA::NextDMABuffer[i] = (phaseAcc >> 24) >> (8 - knob_3_pos/2);
                 // digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-                DMA::DMACurrBuffPtr[i] = (phaseAcc >> 20) >> (8 - knob_3_pos/2);
-            }
 
+                if(!mute){
+                DMA::DMACurrBuffPtr[i] = (phaseAcc >> 20) >> (8 - knob_3_pos/2);
+                }
+                else{
+                   DMA::DMACurrBuffPtr[i] = 0;
+                }
+            }
             if (DMA::DMATMP == DMA::DMACurrBuffPtr){
                 Serial.println("Jerrror");
                 digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
@@ -329,10 +334,16 @@ void displayUpdateTask(void * pvParameters){
         //dev -shaf
         u8g2.setCursor(2,10);
         u8g2.print(local_pressed_keys,BIN);
-
+        bool local_mute = __atomic_load_n( &mute, __ATOMIC_RELAXED);
+        u8g2.setCursor(2,20);
+        if(local_mute){
+          u8g2.print("MUTE");
+        }else{
+           u8g2.print("UNMUTE");
+        }
 
         //u8g2.drawStr(2,10,"Hello World!");  // write something to the internal memory
-        u8g2.setCursor(20, 20);
+        u8g2.setCursor(60, 20);
         u8g2.print(local_knob_3_pos);
         u8g2.setCursor(64, 30);
         u8g2.print((char*) note_message);
