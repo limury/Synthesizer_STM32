@@ -1,3 +1,9 @@
+---
+noteId: "b5acef40864f11ebbe1f35d2d4b4ff54"
+tags: []
+
+---
+
 # Embedded_Synth
 ## How we are going to do polyphony and complex sounds
 
