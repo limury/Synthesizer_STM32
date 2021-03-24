@@ -3,9 +3,15 @@
 #include <Wire.h>
 #include <math.h>
 #include <STM32FreeRTOS.h>
+
 #include "src/main.h"
 //#include <stm32l4xx_hal.h>
 #include "pins.h"
+
+
+//tmp lib
+ #include <stdint.h>
+
 
 #define SOUND false
 #define DMA_REQUEST_DAC1_CH1 6U
@@ -54,6 +60,8 @@ volatile uint8_t knob_3_pos = 0;
 volatile uint32_t current_step_size = 0;
 volatile uint32_t tmp_var = 0;
 volatile bool mute = false;
+volatile bool display_countdown=false;
+volatile bool start_record = false;
 
 volatile SemaphoreHandle_t key_array_mutex;
 namespace DMA {
@@ -230,6 +238,8 @@ void scanKeysTask(void * pvParameters){
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
     uint8_t pressed_key_index_last = -1;
     uint8_t prev_knob3_press=0;
+    uint8_t prev_knob2_press=0;
+
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
         // read rows ----------------------------------------------------------
@@ -271,6 +281,18 @@ void scanKeysTask(void * pvParameters){
             }
         }
         prev_knob3_press = knob3_press;
+        //---------------------------------------------------------------------
+
+
+        //update display timer (knob 2 press)-------------------------------------------
+        uint8_t knob2_press = (reading >> 20) & 0b1;
+        if(prev_knob2_press==1){
+            if(knob2_press==0){
+                bool local_displaycountdown =true;
+                __atomic_store_n( &display_countdown, local_displaycountdown, __ATOMIC_RELAXED);
+            }
+        }
+        prev_knob2_press = knob2_press;
         //---------------------------------------------------------------------
 
         // set pointer increment size and update message-----------------------
@@ -329,9 +351,27 @@ void displayUpdateTask(void * pvParameters){
         }
         // -----------------------------------------------------------------
 
-        u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
+         // choose a suitable font
 
+        bool local_display_countdown = __atomic_load_n( &display_countdown, __ATOMIC_RELAXED);
+        if(local_display_countdown){
+          u8g2.clearBuffer(); 
+          u8g2.setFont(u8g2_font_ncenB08_tr);
+          u8g2.drawStr(2,10,"3");
+          u8g2.sendBuffer();
+          delay(1000);
+          u8g2.drawStr(22,10,"2");
+          u8g2.sendBuffer();
+          delay(1000);
+          u8g2.drawStr(42,10,"1");
+          u8g2.sendBuffer();
+          delay(1000);
+          local_display_countdown = false;
+          __atomic_store_n( &display_countdown, local_display_countdown, __ATOMIC_RELAXED);
+          u8g2.clearBuffer(); 
+        }
         //dev -shaf
+        u8g2.setFont(u8g2_font_ncenB08_tr);
         u8g2.setCursor(2,10);
         u8g2.print(local_pressed_keys,BIN);
         bool local_mute = __atomic_load_n( &mute, __ATOMIC_RELAXED);
