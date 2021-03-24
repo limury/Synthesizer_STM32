@@ -56,12 +56,13 @@ uint32_t SINE_WAVE_110_HZ [200] = { 2147483647, 2214937738, 2282325260, 23495797
 
 volatile uint64_t increment = 0;
 // volatiles
-volatile uint8_t knob_3_pos = 0;
+volatile uint8_t knob_3_pos = 16;
 volatile uint32_t current_step_size = 0;
 volatile uint32_t tmp_var = 0;
 volatile bool mute = false;
 volatile bool display_countdown=false;
 volatile bool start_record = false;
+
 
 volatile SemaphoreHandle_t key_array_mutex;
 namespace DMA {
@@ -259,7 +260,13 @@ void scanKeysTask(void * pvParameters){
             reading = (reading << 4) + readCols();
         }
         reading = ~reading;
-        __atomic_store_n( &pressed_keys, reading, __ATOMIC_RELAXED);
+        bool local_display_countdown = __atomic_load_n( &display_countdown, __ATOMIC_RELAXED);
+        if(local_display_countdown){
+          reading = __atomic_load_n( &pressed_keys, __ATOMIC_RELAXED);
+        }else{
+          __atomic_store_n( &pressed_keys, reading, __ATOMIC_RELAXED);
+        }
+        
         // reading = onehot-encoded value with active keys = 1  ---------------
 
         // update knob 3 readings----------------------------------------------
@@ -359,15 +366,24 @@ void displayUpdateTask(void * pvParameters){
           u8g2.setFont(u8g2_font_ncenB08_tr);
           u8g2.drawStr(2,10,"3");
           u8g2.sendBuffer();
-          delay(1000);
+          __atomic_store_n( &pressed_keys, (1<<7), __ATOMIC_RELAXED);
+          delay(300);
+          __atomic_store_n( &pressed_keys, 0, __ATOMIC_RELAXED);
+          delay(700);
           u8g2.drawStr(22,10,"2");
           u8g2.sendBuffer();
-          delay(1000);
+          __atomic_store_n( &pressed_keys, (1<<7), __ATOMIC_RELAXED);
+          delay(300);
+          __atomic_store_n( &pressed_keys, 0, __ATOMIC_RELAXED);
+          delay(700);
           u8g2.drawStr(42,10,"1");
           u8g2.sendBuffer();
+          __atomic_store_n( &pressed_keys, (1<<9), __ATOMIC_RELAXED);
           delay(1000);
+          __atomic_store_n( &pressed_keys, 0, __ATOMIC_RELAXED);
           local_display_countdown = false;
-          __atomic_store_n( &display_countdown, local_display_countdown, __ATOMIC_RELAXED);
+          __atomic_store_n( &display_countdown, false, __ATOMIC_RELAXED);
+          __atomic_store_n( &start_record,true, __ATOMIC_RELAXED);
           u8g2.clearBuffer(); 
         }
         //dev -shaf
