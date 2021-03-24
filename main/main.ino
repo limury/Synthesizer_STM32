@@ -53,6 +53,7 @@ volatile uint64_t increment = 0;
 volatile uint8_t knob_3_pos = 0;
 volatile uint32_t current_step_size = 0;
 volatile uint32_t tmp_var = 0;
+volatile bool mute = false;
 
 volatile SemaphoreHandle_t key_array_mutex;
 namespace DMA {
@@ -223,17 +224,25 @@ void scanKeysTask(void * pvParameters){
     const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
     uint8_t pressed_key_index_last = -1;
+    uint8_t prev_knob3_press=0;
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
         // read rows ----------------------------------------------------------
-        setRow(3); delayMicroseconds(3);
+        setRow(6); delayMicroseconds(3);
         reading = readCols();
+        /*
         setRow(2); delayMicroseconds(3);
         reading = (reading << 4) + readCols();
         setRow(1); delayMicroseconds(3);
         reading = (reading << 4) + readCols();
         setRow(0); delayMicroseconds(3);
         reading = (reading << 4) + readCols();
+        */
+        for(int i = 5; i >=0  ; i--){
+            setRow(i); 
+            delayMicroseconds(3);
+            reading = (reading << 4) + readCols();
+        }
         reading = ~reading;
         __atomic_store_n( &pressed_keys, reading, __ATOMIC_RELAXED);
         // reading = onehot-encoded value with active keys = 1  ---------------
@@ -247,6 +256,17 @@ void scanKeysTask(void * pvParameters){
         else if (local_knob_3_pos > 16)     local_knob_3_pos = 16;
         __atomic_store_n( &knob_3_pos, local_knob_3_pos, __ATOMIC_RELAXED);
         // --------------------------------------------------------------------
+
+        //update mute (knob 3 press)-------------------------------------------
+        uint8_t knob3_press = (reading >> 21) & 0b1;
+        if(prev_knob3_press==1){
+            if(knob3_press==0){
+                bool local_mute = __atomic_load_n( &mute, __ATOMIC_RELAXED);
+                __atomic_store_n( &mute, !local_mute, __ATOMIC_RELAXED);
+            }
+        }
+        prev_knob3_press = knob3_press;
+        //---------------------------------------------------------------------
 
         // set pointer increment size and update message-----------------------
         for (uint8_t i = 0; i < 12; i++){
@@ -277,7 +297,7 @@ void scanKeysTask(void * pvParameters){
 }
 
 void displayUpdateTask(void * pvParameters){
-    uint8_t local_pressed_keys = 0;
+    uint32_t local_pressed_keys = 0;
     uint8_t local_knob_3_pos;
     char local_note_message[3];
 
@@ -305,7 +325,13 @@ void displayUpdateTask(void * pvParameters){
         // -----------------------------------------------------------------
 
         u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
-        u8g2.drawStr(2,10,"Hello World!");  // write something to the internal memory
+
+        //dev -shaf
+        u8g2.setCursor(2,10);
+        u8g2.print(local_pressed_keys,BIN);
+
+
+        //u8g2.drawStr(2,10,"Hello World!");  // write something to the internal memory
         u8g2.setCursor(20, 20);
         u8g2.print(local_knob_3_pos);
         u8g2.setCursor(64, 30);
