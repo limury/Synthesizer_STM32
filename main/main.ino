@@ -3,7 +3,7 @@
 #include <Wire.h>
 #include <math.h>
 #include <STM32FreeRTOS.h>
-
+#include <CircularBuffer.h>
 #include "src/main.h"
 //#include <stm32l4xx_hal.h>
 #include "pins.h"
@@ -56,13 +56,17 @@ uint32_t SINE_WAVE_110_HZ [200] = { 2147483647, 2214937738, 2282325260, 23495797
 
 volatile uint64_t increment = 0;
 // volatiles
-volatile uint8_t knob_3_pos = 16;
+volatile uint8_t knob_3_pos = 0;
 volatile uint32_t current_step_size = 0;
 volatile uint32_t tmp_var = 0;
 volatile bool mute = false;
 volatile bool display_countdown=false;
-volatile bool start_record = false;
+volatile bool record = false;
+volatile bool record_play =false;
+volatile uint16_t  max_record_time_seconds = 3;
 
+//circular buffer 5000ms not protected by mutex currently
+CircularBuffer<uint32_t,1000 > recorded_buffer;
 
 volatile SemaphoreHandle_t key_array_mutex;
 namespace DMA {
@@ -96,7 +100,7 @@ namespace DMA {
                 }
             }
             if (DMA::DMATMP == DMA::DMACurrBuffPtr){
-                Serial.println("Jerrror");
+                //Serial.println("Jerrror");
                 digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
             }
             DMA::DMATMP = DMA::DMACurrBuffPtr;
@@ -240,7 +244,11 @@ void scanKeysTask(void * pvParameters){
     uint8_t pressed_key_index_last = -1;
     uint8_t prev_knob3_press=0;
     uint8_t prev_knob2_press=0;
-
+    uint16_t prev_keys = 0;
+    uint16_t key = 0;
+    uint32_t last_key_change_time = 0;
+    bool record_setup = true;
+    
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
         // read rows ----------------------------------------------------------
@@ -261,11 +269,57 @@ void scanKeysTask(void * pvParameters){
         }
         reading = ~reading;
         bool local_display_countdown = __atomic_load_n( &display_countdown, __ATOMIC_RELAXED);
-        if(local_display_countdown){
+        bool local_record_play = __atomic_load_n( &record_play, __ATOMIC_RELAXED);
+        if(local_display_countdown || local_record_play){
           reading = __atomic_load_n( &pressed_keys, __ATOMIC_RELAXED);
         }else{
           __atomic_store_n( &pressed_keys, reading, __ATOMIC_RELAXED);
         }
+        //make sure reading is 28 bit long
+        reading = reading << 4;
+        reading = reading >> 4;
+
+        //recording code
+        bool local_record = __atomic_load_n( &record, __ATOMIC_RELAXED);
+        key = reading&0b111111111111;
+        
+        
+
+        if(local_record){
+          if(record_setup){
+            last_key_change_time = millis();
+            prev_keys = 0b1 << 13;
+            record_setup = false;
+            delay(2);
+          }
+          if(prev_keys != key ){
+            uint32_t time = millis() - last_key_change_time;
+            uint16_t local_max_time =  __atomic_load_n( &max_record_time_seconds, __ATOMIC_RELAXED);
+            if(time > (local_max_time*1000) ){
+              time = 0;
+            }
+            last_key_change_time = millis();
+            Serial.println("hi");
+            Serial.println(prev_keys);
+            Serial.println(time);
+            recorded_buffer.push( (prev_keys&0b111111111111) + (time << 12) );
+          }
+        }else{
+          if(!record_setup){
+            uint32_t time = millis() - last_key_change_time;
+            uint16_t local_max_time =  __atomic_load_n( &max_record_time_seconds, __ATOMIC_RELAXED);
+            if(time > (local_max_time*1000) ){
+              time = 0;
+            }
+            last_key_change_time = millis();
+            Serial.println("last");
+            Serial.println(prev_keys);
+            Serial.println(time);
+            recorded_buffer.push( (prev_keys&0b111111111111) + (time << 12) );
+            record_setup = true;
+          }
+        }
+        prev_keys = key;
         
         // reading = onehot-encoded value with active keys = 1  ---------------
 
@@ -381,11 +435,51 @@ void displayUpdateTask(void * pvParameters){
           __atomic_store_n( &pressed_keys, (1<<9), __ATOMIC_RELAXED);
           delay(1000);
           __atomic_store_n( &pressed_keys, 0, __ATOMIC_RELAXED);
+
           local_display_countdown = false;
+
           __atomic_store_n( &display_countdown, false, __ATOMIC_RELAXED);
-          __atomic_store_n( &start_record,true, __ATOMIC_RELAXED);
+          __atomic_store_n( &record,true, __ATOMIC_RELAXED);
           u8g2.clearBuffer(); 
         }
+
+        //record display
+        bool local_record = __atomic_load_n( &record, __ATOMIC_RELAXED);
+        if(local_record){
+          uint16_t local_max_time =  __atomic_load_n( &max_record_time_seconds, __ATOMIC_RELAXED);
+          u8g2.clearBuffer();
+          for(int i = 1 ; i <= local_max_time ; i++){
+             u8g2.setFont(u8g2_font_ncenB08_tr);
+             u8g2.setCursor(50,20);
+             u8g2.print(i);
+             u8g2.sendBuffer();
+             delay(1000);
+             u8g2.clearBuffer(); 
+          }
+          __atomic_store_n( &record,false, __ATOMIC_RELAXED);
+          __atomic_store_n( &record_play,true, __ATOMIC_RELAXED);
+        }
+
+        //play record
+        bool local_record_play = __atomic_load_n( &record_play, __ATOMIC_RELAXED);
+        if(local_record_play){
+          uint16_t local_max_time =  __atomic_load_n( &max_record_time_seconds, __ATOMIC_RELAXED);
+
+          while(!recorded_buffer.isEmpty()){
+            uint32_t buffdata = recorded_buffer.shift();
+            uint16_t keys = buffdata & 0b111111111111;
+            u8g2.setCursor(2,10);
+            u8g2.print((buffdata >> 12) , DEC);
+            u8g2.setCursor(2,20);
+            u8g2.print(keys , BIN);
+            u8g2.sendBuffer();
+            __atomic_store_n( &pressed_keys,keys, __ATOMIC_RELAXED);
+            delay((buffdata >> 12));
+            u8g2.clearBuffer();
+          }
+          __atomic_store_n( &record_play,false, __ATOMIC_RELAXED);
+        }
+
         //dev -shaf
         u8g2.setFont(u8g2_font_ncenB08_tr);
         u8g2.setCursor(2,10);
