@@ -684,6 +684,21 @@ void serialDecoderTask(void * pvParameters){
     }
 }
 
+void replay(void * pvParameters){
+
+    const TickType_t xFrequency = 1000/portTICK_PERIOD_MS;
+    TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
+
+    while(1){   
+      vTaskDelayUntil( &xLastWakeTime, xFrequency );
+      
+    
+    }
+
+
+  
+}
+
 // decodes the state change of the knob into a reading for the value change
 inline uint8_t decodeKnobChange(const uint8_t& state, const uint8_t& past_change){
     switch(state){
@@ -775,6 +790,9 @@ void setup() {
 
     TaskHandle_t serialDecoderHandle = NULL;
     xTaskCreate( serialDecoderTask, "serialDecoder", 64, NULL, 3, &serialDecoderHandle );
+
+    TaskHandle_t replayHandle = NULL;
+    xTaskCreate( replay, "replay", 256, NULL, 3, &replayHandle );
 
     // // declare mutexes and other structures
     key_array_mutex = xSemaphoreCreateMutex(); // could use xSemaphoreCreateMutexStatic for it to be faster
