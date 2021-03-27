@@ -15,6 +15,7 @@
 //tmp lib
 //#include <stdint.h>
 
+using namespace std;
 
 #define SOUND false
 #define DMA_REQUEST_DAC1_CH1 6U
@@ -25,12 +26,13 @@
 //classes 
 
 ///fixed sized buffer
+#define buffMaxSize 1000
 class buffer{
 
 private:
-  int maxSize = 1000;
-  uint32_t data[1000];
-  uint32_t saved_data[1000];
+  int maxSize = buffMaxSize;
+  uint32_t data[buffMaxSize];
+  uint32_t saved_data[buffMaxSize];
   int saved_data_size = 0;
   uint32_t currentPointer =0;
   bool empty = true;
@@ -80,11 +82,11 @@ public:
     return saved_data_size;
   }
 
-  uint32_t read(uint32_t i){
+  uint32_t readBuffer(uint32_t i){
     return data[i];
   }
 
-  uint32_t read_saved(uint32_t i){
+  uint32_t read_saved_Buffer(uint32_t i){
     return saved_data[i];
   }
 
@@ -99,6 +101,29 @@ public:
   }
 };
 
+class replayBuffer : public buffer
+{
+public:
+  ///input a 12 bit key presses and input time in millisecond. Time can be maximum of 20 bit number. If time is greater than 20bit then the last 12 msb gets cut off. If save not successful then return false otherwise true.
+  bool SaveKeyPress(uint32_t keys , uint32_t time ){
+
+    uint32_t value = (time << 12) + (keys & 0b111111111111);
+    push(value);
+  }
+
+  ///return a tuple type. First tuple is key press (12bit) and 2nd is time(20bit) in milliseconds.
+  tuple<uint32_t, uint32_t> readKeypressAndTime(int i){
+    uint32_t value = readBuffer(i);
+    return make_tuple( (value>>12) , (value  & 0b111111111111) );
+  }
+
+  ///return a tuple type. First tuple is saved key press (12bit) and 2nd is time(20bit) in milliseconds.
+  tuple<uint32_t, uint32_t> read_Saved_KeypressAndTime(int i){
+    uint32_t value = read_saved_Buffer(i);
+    return make_tuple( (value>>12) , (value  & 0b111111111111) );
+  }
+
+};
 
 DAC_HandleTypeDef hdac1;
 DMA_HandleTypeDef hdma_dac_ch1;
@@ -150,7 +175,7 @@ volatile uint16_t  max_record_time_seconds = 3;
 //circular buffer 5000ms not protected by mutex currently
 //CircularBuffer<uint32_t,1000 > recorded_buffer;
 //uint32_t MaxBuffSize = 1000;
-buffer recorded_buffer;
+replayBuffer recorded_buffer;
 
 volatile SemaphoreHandle_t key_array_mutex;
 namespace DMA {
@@ -387,6 +412,7 @@ void scanKeysTask(void * pvParameters){
             Serial.println(prev_keys);
             Serial.println(time);
             recorded_buffer.push( (prev_keys&0b111111111111) + (time << 12) );
+            
           }
         }else{
           if(!record_setup){
@@ -565,7 +591,7 @@ void displayUpdateTask(void * pvParameters){
           */
 
           for(int i = 0 ; i < recorded_buffer.sizeOfbuffer() ; i++){
-            uint32_t buffdata = recorded_buffer.read(i);
+            uint32_t buffdata = recorded_buffer.readBuffer(i);
             uint16_t keys = buffdata & 0b111111111111;
             u8g2.setCursor(2,10);
             u8g2.print((buffdata >> 12) , DEC);
