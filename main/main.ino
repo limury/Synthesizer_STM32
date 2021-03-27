@@ -1,22 +1,104 @@
-
+#include <Arduino.h> 
+#include "pins.h"
+#include "src/main.h"
 #include <U8g2lib.h>
 #include <Wire.h>
 #include <math.h>
 #include <STM32FreeRTOS.h>
-#include <CircularBuffer.h>
-#include "src/main.h"
+
+//#include <CircularBuffer.h>
+
 //#include <stm32l4xx_hal.h>
-#include "pins.h"
+
 
 
 //tmp lib
- #include <stdint.h>
+//#include <stdint.h>
 
 
 #define SOUND false
 #define DMA_REQUEST_DAC1_CH1 6U
 #define BUFFER_SIZE 500
 #define HALF_BUFFER_SIZE BUFFER_SIZE/2 
+
+
+//classes 
+
+///fixed sized buffer
+class buffer{
+
+private:
+  int maxSize = 1000;
+  uint32_t data[1000];
+  uint32_t saved_data[1000];
+  int saved_data_size = 0;
+  uint32_t currentPointer =0;
+  bool empty = true;
+
+public:
+  
+  
+  ///push data in. If successfully stored then return true otherwise if full then dont store and return false.
+  bool push(uint32_t value){
+    if(currentPointer  < maxSize  ){
+      currentPointer++;
+      data[currentPointer] = value;
+      if(empty){
+        empty = false;
+      }
+      return true;
+    }else{
+      return false;
+    }
+  };
+
+  ///returns data from head. If empty then return 0.
+  uint32_t pop(){
+    if(!empty){
+      if(currentPointer == 0){
+        empty = true;
+        return data[currentPointer];
+      }else{
+        currentPointer--;
+        return data[currentPointer + 1];
+      }
+    }else{
+      return 0;
+    }
+  }
+
+  
+  bool isEmpty(){
+    return empty;
+  }
+
+  uint32_t sizeOfbuffer(){
+    return currentPointer+1;
+  }
+
+  uint32_t sizeOfSaved(){
+    return saved_data_size;
+  }
+
+  uint32_t read(uint32_t i){
+    return data[i];
+  }
+
+  uint32_t read_saved(uint32_t i){
+    return saved_data[i];
+  }
+
+  void save(){
+    memcpy ( &saved_data, &data, (currentPointer+1) * 4 );
+    saved_data_size = currentPointer+1;
+  }
+
+  void clear_buffer(){
+    empty = true;
+    currentPointer = 0;
+  }
+};
+
 
 DAC_HandleTypeDef hdac1;
 DMA_HandleTypeDef hdma_dac_ch1;
@@ -66,7 +148,9 @@ volatile bool record_play =false;
 volatile uint16_t  max_record_time_seconds = 3;
 
 //circular buffer 5000ms not protected by mutex currently
-CircularBuffer<uint32_t,1000 > recorded_buffer;
+//CircularBuffer<uint32_t,1000 > recorded_buffer;
+//uint32_t MaxBuffSize = 1000;
+buffer recorded_buffer;
 
 volatile SemaphoreHandle_t key_array_mutex;
 namespace DMA {
@@ -465,6 +549,7 @@ void displayUpdateTask(void * pvParameters){
         if(local_record_play){
           uint16_t local_max_time =  __atomic_load_n( &max_record_time_seconds, __ATOMIC_RELAXED);
 
+          /*
           while(!recorded_buffer.isEmpty()){
             uint32_t buffdata = recorded_buffer.shift();
             uint16_t keys = buffdata & 0b111111111111;
@@ -477,6 +562,21 @@ void displayUpdateTask(void * pvParameters){
             delay((buffdata >> 12));
             u8g2.clearBuffer();
           }
+          */
+
+          for(int i = 0 ; i < recorded_buffer.sizeOfbuffer() ; i++){
+            uint32_t buffdata = recorded_buffer.read(i);
+            uint16_t keys = buffdata & 0b111111111111;
+            u8g2.setCursor(2,10);
+            u8g2.print((buffdata >> 12) , DEC);
+            u8g2.setCursor(2,20);
+            u8g2.print(keys , BIN);
+            u8g2.sendBuffer();
+            __atomic_store_n( &pressed_keys,keys, __ATOMIC_RELAXED);
+            delay((buffdata >> 12));           
+            u8g2.clearBuffer();
+          }
+          recorded_buffer.clear_buffer();
           __atomic_store_n( &record_play,false, __ATOMIC_RELAXED);
         }
 
