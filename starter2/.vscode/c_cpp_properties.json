@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "C:\\Users\\aydes\\AppData\\Local\\Arduino15\\packages\\STM32\\tools\\**",
+                "C:\\Users\\aydes\\OneDrive\\Documents\\Arduino\\libraries\\**",
+                "C:\\Program Files (x86)\\Arduino\\libraries\\**",
+                "C:\\Users\\aydes\\AppData\\Local\\Arduino15\\packages\\STM32\\hardware\\stm32\\1.9.0\\**"
+            ],
+            "forcedInclude": [
+                "C:\\Users\\aydes\\AppData\\Local\\Arduino15\\packages\\STM32\\hardware\\stm32\\1.9.0\\cores\\arduino\\Arduino.h"
+            ],
+            "defines": [
+                "USBCON"
+            ],
+            "intelliSenseMode": "windows-msvc-x64",
+            "compilerPath": "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.28.29333/bin/Hostx64/x64/cl.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++17"
+        }
+    ],
+    "version": 4
+}
