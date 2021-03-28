@@ -133,10 +133,11 @@ typedef struct displayInfoStruct{
 }displayInfo_t;
 
 
-
+/*
 //global helper functions
 ///return pointer to a struct
-displayInfo_t* encodeDisplayInfo(uint8_t X, uint8_t Y, uint32_t Data, uint8_t Base){
+displayInfo_t encodeDisplayInfo(uint8_t X, uint8_t Y, uint32_t Data, uint8_t Base){
+  
   displayInfo_t* pntr = new  displayInfo_t;
   pntr->x = X;
   pntr->y = Y;
@@ -146,9 +147,10 @@ displayInfo_t* encodeDisplayInfo(uint8_t X, uint8_t Y, uint32_t Data, uint8_t Ba
 };
 
 void decodeDisplayInfo (displayInfo_t* pntr){
-  delete pntr;
+  
+  //delete pntr;
 };
-
+*/
 DAC_HandleTypeDef hdac1;
 DMA_HandleTypeDef hdma_dac_ch1;
 
