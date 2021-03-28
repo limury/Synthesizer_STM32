@@ -1,11 +1,11 @@
 #include <Arduino.h> 
 #include "pins.h"
-#include "src/main.h"
+
 #include <U8g2lib.h>
 #include <Wire.h>
 #include <math.h>
 #include <STM32FreeRTOS.h>
-
+#include "src/main.h"
 //#include <CircularBuffer.h>
 
 //#include <stm32l4xx_hal.h>
@@ -24,7 +24,7 @@ using namespace std;
 
 
 //classes 
-
+//typedef unsigned int uint32_t;
 ///fixed sized buffer
 #define buffMaxSize 1000
 class buffer{
@@ -120,9 +120,33 @@ public:
   ///return a tuple type. First tuple is saved key press (12bit) and 2nd is time(20bit) in milliseconds.
   tuple<uint32_t, uint32_t> read_Saved_KeypressAndTime(int i){
     uint32_t value = read_saved_Buffer(i);
-    return make_tuple( (value>>12) , (value  & 0b111111111111) );
+    return make_tuple( (value>>12) , (value  & 0b111111111111 ) );
   }
 
+};
+
+typedef struct displayInfoStruct{
+  uint8_t x;
+  uint8_t y;
+  uint32_t data;
+  uint8_t base;
+}displayInfo_t;
+
+
+
+//global helper functions
+///return pointer to a struct
+displayInfo_t* encodeDisplayInfo(uint8_t X, uint8_t Y, uint32_t Data, uint8_t Base){
+  displayInfo_t* pntr = new  displayInfo_t;
+  pntr->x = X;
+  pntr->y = Y;
+  pntr->data = Data;
+  pntr->base = Base;
+  return pntr;
+};
+
+void decodeDisplayInfo (displayInfo_t* pntr){
+  delete pntr;
 };
 
 DAC_HandleTypeDef hdac1;
@@ -171,6 +195,9 @@ volatile bool display_countdown=false;
 volatile bool record = false;
 volatile bool record_play =false;
 volatile uint16_t  max_record_time_seconds = 3;
+
+
+volatile bool start_replay;
 
 //circular buffer 5000ms not protected by mutex currently
 //CircularBuffer<uint32_t,1000 > recorded_buffer;
@@ -295,9 +322,11 @@ namespace DMA {
 
 volatile char note_message[] = "xxx";
 QueueHandle_t msg_out_q;
+QueueHandle_t display_q;
 
 // one-hot encoded value
 volatile uint32_t pressed_keys = 0;
+volatile uint32_t execute_keys = 0;
 
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
@@ -575,20 +604,6 @@ void displayUpdateTask(void * pvParameters){
         if(local_record_play){
           uint16_t local_max_time =  __atomic_load_n( &max_record_time_seconds, __ATOMIC_RELAXED);
 
-          /*
-          while(!recorded_buffer.isEmpty()){
-            uint32_t buffdata = recorded_buffer.shift();
-            uint16_t keys = buffdata & 0b111111111111;
-            u8g2.setCursor(2,10);
-            u8g2.print((buffdata >> 12) , DEC);
-            u8g2.setCursor(2,20);
-            u8g2.print(keys , BIN);
-            u8g2.sendBuffer();
-            __atomic_store_n( &pressed_keys,keys, __ATOMIC_RELAXED);
-            delay((buffdata >> 12));
-            u8g2.clearBuffer();
-          }
-          */
 
           for(int i = 0 ; i < recorded_buffer.sizeOfbuffer() ; i++){
             uint32_t buffdata = recorded_buffer.readBuffer(i);
@@ -689,8 +704,14 @@ void replay(void * pvParameters){
     const TickType_t xFrequency = 1000/portTICK_PERIOD_MS;
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
 
+    
+
     while(1){   
       vTaskDelayUntil( &xLastWakeTime, xFrequency );
+      if(start_replay)
+      {
+        
+      }
       
     
     }
@@ -797,7 +818,7 @@ void setup() {
     // // declare mutexes and other structures
     key_array_mutex = xSemaphoreCreateMutex(); // could use xSemaphoreCreateMutexStatic for it to be faster
     msg_out_q = xQueueCreate( 8, 4 );
-
+    display_q = xQueueCreate( 10, 4 );
     // // start interrupts and scheduler
     // // sampleTimer->resume();
     HAL_DMA_RegisterCallback( &hdma_dac_ch1, HAL_DMA_XFER_CPLT_CB_ID, &DMA::DMA_Buffer_End_Callback);
