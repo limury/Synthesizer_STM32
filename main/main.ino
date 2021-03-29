@@ -12,9 +12,6 @@
 
 
 
-//tmp lib
-//#include <stdint.h>
-
 using namespace std;
 
 #define SOUND false
@@ -128,8 +125,10 @@ public:
 typedef struct displayInfoStruct{
   uint8_t x;
   uint8_t y;
-  uint32_t data;
   uint8_t base;
+  uint8_t bool_clear;
+  uint32_t data;
+  
 }displayInfo_t;
 
 
@@ -205,6 +204,11 @@ volatile bool start_replay;
 //CircularBuffer<uint32_t,1000 > recorded_buffer;
 //uint32_t MaxBuffSize = 1000;
 replayBuffer recorded_buffer;
+
+
+//helper function
+
+//take in displayinfo_t pntr and push relevant info to the buffer
 
 volatile SemaphoreHandle_t key_array_mutex;
 namespace DMA {
@@ -333,6 +337,22 @@ volatile uint32_t execute_keys = 0;
 //Display driver object
 U8G2_SSD1305_128X32_NONAME_F_HW_I2C u8g2(U8G2_R0);
 
+void printDisplayInfo(displayInfo_t* temp)
+{
+
+  if( (temp->bool_clear) == 0){
+
+    u8g2.setCursor( (temp->x), (temp->y) );
+    u8g2.print( (temp->data), (int)(temp->base) );
+    u8g2.sendBuffer();  
+  }else
+  {
+    u8g2.clearBuffer();
+
+  }
+}; 
+
+
 // //Function to set outputs via matrix
 void setOutMuxBit(const uint8_t bitIdx, const bool value) {
       digitalWrite(REN_PIN,LOW);
@@ -410,15 +430,19 @@ void scanKeysTask(void * pvParameters){
         reading = ~reading;
         bool local_display_countdown = __atomic_load_n( &display_countdown, __ATOMIC_RELAXED);
         bool local_record_play = __atomic_load_n( &record_play, __ATOMIC_RELAXED);
+        /*
         if(local_display_countdown || local_record_play){
           reading = __atomic_load_n( &pressed_keys, __ATOMIC_RELAXED);
         }else{
           __atomic_store_n( &pressed_keys, reading, __ATOMIC_RELAXED);
-        }
+        }      
+        */
+        __atomic_store_n( &pressed_keys, reading, __ATOMIC_RELAXED);
         //make sure reading is 28 bit long
         reading = reading << 4;
         reading = reading >> 4;
 
+        /*
         //recording code
         bool local_record = __atomic_load_n( &record, __ATOMIC_RELAXED);
         key = reading&0b111111111111;
@@ -461,7 +485,7 @@ void scanKeysTask(void * pvParameters){
           }
         }
         prev_keys = key;
-        
+        */
         // reading = onehot-encoded value with active keys = 1  ---------------
 
         // update knob 3 readings----------------------------------------------
@@ -490,8 +514,9 @@ void scanKeysTask(void * pvParameters){
         uint8_t knob2_press = (reading >> 20) & 0b1;
         if(prev_knob2_press==1){
             if(knob2_press==0){
-                bool local_displaycountdown =true;
-                __atomic_store_n( &display_countdown, local_displaycountdown, __ATOMIC_RELAXED);
+                //bool local_displaycountdown =true;
+                __atomic_store_n( &display_countdown, true, __ATOMIC_RELAXED);
+                __atomic_store_n( &start_replay, true, __ATOMIC_RELAXED);
             }
         }
         prev_knob2_press = knob2_press;
@@ -525,6 +550,8 @@ void scanKeysTask(void * pvParameters){
     }
 }
 
+
+
 void displayUpdateTask(void * pvParameters){
     uint32_t local_pressed_keys = 0;
     uint8_t local_knob_3_pos;
@@ -533,6 +560,9 @@ void displayUpdateTask(void * pvParameters){
     // setup interval timer
     const TickType_t xFrequency = 100/portTICK_PERIOD_MS;
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
+    
+    
+    
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
         // copy key array 
         local_pressed_keys = __atomic_load_n( &pressed_keys, __ATOMIC_RELAXED);
@@ -542,19 +572,14 @@ void displayUpdateTask(void * pvParameters){
         xSemaphoreGive(key_array_mutex);
 
         // operate on display
-        u8g2.clearBuffer();         // clear the internal memory
+        //u8g2.clearBuffer();         // bool_clear the internal memory
         // read key and print
         // -----------------------------------------------------------------
-        for (uint8_t i = 0; i < 12; i++){
-            if ( (local_pressed_keys >> i) & 0b1 ){
-                u8g2.drawStr(2,30, NOTE_NAMES[ i ]);
-                break;
-            }
-        }
+        
         // -----------------------------------------------------------------
 
          // choose a suitable font
-
+        /*
         bool local_display_countdown = __atomic_load_n( &display_countdown, __ATOMIC_RELAXED);
         if(local_display_countdown){
           u8g2.clearBuffer(); 
@@ -622,31 +647,56 @@ void displayUpdateTask(void * pvParameters){
           recorded_buffer.clear_buffer();
           __atomic_store_n( &record_play,false, __ATOMIC_RELAXED);
         }
-
+        */
         //dev -shaf
+        
+        
         u8g2.setFont(u8g2_font_ncenB08_tr);
-        u8g2.setCursor(2,10);
-        u8g2.print(local_pressed_keys,BIN);
-        bool local_mute = __atomic_load_n( &mute, __ATOMIC_RELAXED);
-        u8g2.setCursor(2,20);
-        if(local_mute){
-          u8g2.print("MUTE");
-        }else{
-           u8g2.print("UNMUTE");
-        }
+        bool start_replay_local = __atomic_load_n( &start_replay, __ATOMIC_RELAXED);
+        
+        if(start_replay_local){
+          
+          displayInfo_t temp ;  
+          if(xQueueReceive(display_q, &temp, 0)){            
+            printDisplayInfo(&temp);
+          }
 
-        //u8g2.drawStr(2,10,"Hello World!");  // write something to the internal memory
-        u8g2.setCursor(60, 20);
-        u8g2.print(local_knob_3_pos);
-        u8g2.setCursor(64, 30);
-        u8g2.print((char*) note_message);
-        u8g2.sendBuffer();          // transfer internal memory to the display
+        }else if(!start_replay_local){
+          u8g2.clearBuffer();
+          for (uint8_t i = 0; i < 12; i++){
+            if ( (local_pressed_keys >> i) & 0b1 ){
+                u8g2.drawStr(2,30, NOTE_NAMES[ i ]);
+                break;
+            }
+          }
+          
+          u8g2.setCursor(2,10);
+          u8g2.print(local_pressed_keys,BIN);
+          bool local_mute = __atomic_load_n( &mute, __ATOMIC_RELAXED);
+          u8g2.setCursor(2,20);
+          if(local_mute){
+            u8g2.print("MUTE");
+          }else{
+            u8g2.print("UNMUTE");
+          }
+
+          //u8g2.drawStr(2,10,"Hello World!");  // write something to the internal memory
+          u8g2.setCursor(60, 20);
+          u8g2.print(local_knob_3_pos);
+          u8g2.setCursor(64, 30);
+          u8g2.print((char*) note_message);
+          u8g2.sendBuffer();  
+
+        }
+    }
+        //u8g2.sendBuffer();          // transfer internal memory to the display
 
         //Toggle LED
         // digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
 
-    }
-}
+
+    
+}  
 
 void msgOutTask(void * pvParameters){
 
@@ -701,26 +751,53 @@ void serialDecoderTask(void * pvParameters){
     }
 }
 
-void replay(void * pvParameters){
+void replay(void * pvParameters)
+{
 
-    const TickType_t xFrequency = 1000/portTICK_PERIOD_MS;
+    const TickType_t xFrequency = 20/portTICK_PERIOD_MS;
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
 
-    
-
-    while(1){   
+    while(1)
+    {   
       vTaskDelayUntil( &xLastWakeTime, xFrequency );
-      if(start_replay)
+      bool start_replay_local =  __atomic_load_n( &start_replay, __ATOMIC_RELAXED);
+      if(start_replay_local)
       {
+        displayInfo_t send ;
+        send.x = 2;
+        send.y = 10;
+        send.data = 1;
+        send.base = 10;
+        send.bool_clear = 1;
+        xQueueSend(display_q, &send, portMAX_DELAY );
+        send.bool_clear = 0;
         
+        vTaskDelay(100/portTICK_PERIOD_MS);
+        xQueueSend(display_q, &send, portMAX_DELAY );
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+        send.x = 12;
+        send.data = 2;
+        xQueueSend(display_q, &send, portMAX_DELAY );
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+        send.x = 22;
+        send.data = 3;
+        xQueueSend(display_q, &send, portMAX_DELAY );
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+        __atomic_store_n( &start_replay, false, __ATOMIC_RELAXED);
+       
+        /*
+        send.x = 2;
+        send.y = 10;
+        send.Data = 1;
+        send.base = 10;
+        */ 
       }
-      
-    
     }
+};
 
 
   
-}
+
 
 // decodes the state change of the knob into a reading for the value change
 inline uint8_t decodeKnobChange(const uint8_t& state, const uint8_t& past_change){
@@ -820,7 +897,7 @@ void setup() {
     // // declare mutexes and other structures
     key_array_mutex = xSemaphoreCreateMutex(); // could use xSemaphoreCreateMutexStatic for it to be faster
     msg_out_q = xQueueCreate( 8, 4 );
-    display_q = xQueueCreate( 10, 4 );
+    display_q = xQueueCreate( 8, 8 );
     // // start interrupts and scheduler
     // // sampleTimer->resume();
     HAL_DMA_RegisterCallback( &hdma_dac_ch1, HAL_DMA_XFER_CPLT_CB_ID, &DMA::DMA_Buffer_End_Callback);
