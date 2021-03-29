@@ -430,6 +430,13 @@ void scanKeysTask(void * pvParameters){
         reading = ~reading;
         bool local_display_countdown = __atomic_load_n( &display_countdown, __ATOMIC_RELAXED);
         bool local_record_play = __atomic_load_n( &record_play, __ATOMIC_RELAXED);
+        if(start_replay)
+        {
+          reading = __atomic_load_n( &pressed_keys, __ATOMIC_RELAXED);
+        }else{
+          __atomic_store_n( &pressed_keys, reading, __ATOMIC_RELAXED);
+        }
+       
         /*
         if(local_display_countdown || local_record_play){
           reading = __atomic_load_n( &pressed_keys, __ATOMIC_RELAXED);
@@ -774,15 +781,23 @@ void replay(void * pvParameters)
         
         vTaskDelay(100/portTICK_PERIOD_MS);
         xQueueSend(display_q, &send, portMAX_DELAY );
-        vTaskDelay(1000/portTICK_PERIOD_MS);
+        __atomic_store_n( &pressed_keys, 0b1<<7, __ATOMIC_RELAXED);
+        vTaskDelay(300/portTICK_PERIOD_MS);
+        __atomic_store_n( &pressed_keys, 0b0, __ATOMIC_RELAXED);
+        vTaskDelay(700/portTICK_PERIOD_MS);
         send.x = 12;
         send.data = 2;
         xQueueSend(display_q, &send, portMAX_DELAY );
-        vTaskDelay(1000/portTICK_PERIOD_MS);
+        __atomic_store_n( &pressed_keys, 0b1<<7, __ATOMIC_RELAXED);
+        vTaskDelay(300/portTICK_PERIOD_MS);
+        __atomic_store_n( &pressed_keys, 0b0, __ATOMIC_RELAXED);
+        vTaskDelay(700/portTICK_PERIOD_MS);
         send.x = 22;
         send.data = 3;
         xQueueSend(display_q, &send, portMAX_DELAY );
+        __atomic_store_n( &pressed_keys, 0b1<<11, __ATOMIC_RELAXED);
         vTaskDelay(1000/portTICK_PERIOD_MS);
+        __atomic_store_n( &pressed_keys, 0b0, __ATOMIC_RELAXED);
         __atomic_store_n( &start_replay, false, __ATOMIC_RELAXED);
        
         /*
