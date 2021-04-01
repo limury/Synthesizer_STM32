@@ -73,6 +73,7 @@ namespace KeyVars{
     volatile uint64_t decoder_increments[12] = {0,0,0,0,0,0,0,0,0,0,0,0,};
     volatile uint8_t  knob_positions[4] = {0,0,0,0}; // position of each knob
     QueueHandle_t     message_out_queue;
+    volatile bool mute = false;
 }
 namespace Mutex{
     SemaphoreHandle_t increments_mutex;
@@ -95,11 +96,16 @@ namespace DMA {
         uint32_t local_pressed_keys = 0;
         uint8_t n_keys;
         uint8_t expanded_pressed_keys[12];
+        bool local_mute = false;
 
         while(1){
             n_keys = 0;
             local_pressed_keys = __atomic_load_n( &KeyVars::pressed_keys, __ATOMIC_RELAXED);
-
+            local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
+            if(local_mute)
+            {
+                local_pressed_keys = local_pressed_keys & ~0b111111111111;  
+            }
             // zero out the array
             memset( (void*) DMA::DMAModifiableBuffer, 0, sizeof(uint32_t)*HALF_BUFFER_SIZE );
             for (uint32_t i = 0; i < 12; i++){
@@ -212,14 +218,18 @@ namespace Utils{
 void scanKeysTask(void * pvParameters){
     uint32_t local_pressed_keys = 0, last_pressed_keys = 0;
     uint8_t local_knob_positions[4] = {0,0,0,0}, last_knob_states[4] = {0,0,0,0}, knob_states[4] = {0,0,0,0}, knob_changes[4] = {0,0,0,0};
+    bool local_mute = false;
 
     // setup interval timer
     const TickType_t xFrequency    = 20/portTICK_PERIOD_MS;
     TickType_t       xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
     uint8_t          pressed_key_index_last = -1;
+
+
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
         // reading = onehot-encoded value with active keys = 1  ---------------
         local_pressed_keys = Utils::readKeys();
+        
         __atomic_store_n( &KeyVars::pressed_keys, local_pressed_keys, __ATOMIC_RELAXED );
 
         // extract knob readings ----------------------------------------------
@@ -251,6 +261,17 @@ void scanKeysTask(void * pvParameters){
                 // xQueueSend( KeyVars::message_out_queue, tmp_message, portMAX_DELAY );
             }
         }
+        //mute button on knob0 press
+        uint8_t knob3_press = (local_pressed_keys >> 24) & 0b1;
+        uint8_t prev_knob3_press = (last_pressed_keys >> 24) & 0b1;
+        if(prev_knob3_press==1){
+            if(knob3_press==0){
+                local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
+                __atomic_store_n( &KeyVars::mute, !local_mute, __ATOMIC_RELAXED);
+            }
+        }
+        prev_knob3_press = knob3_press;
+
         last_pressed_keys = local_pressed_keys;
     }
 }
@@ -259,9 +280,11 @@ void displayUpdateTask(void * pvParameters){
     uint32_t local_pressed_keys = 0;
     // setup interval timer
     const TickType_t xFrequency = 100/portTICK_PERIOD_MS;
+    bool local_mute = 0;
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
         local_pressed_keys = __atomic_load_n( &KeyVars::pressed_keys, __ATOMIC_RELAXED );
+        local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
         // operate on display
         u8g2.clearBuffer();         // clear the internal memory
         u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
@@ -279,6 +302,14 @@ void displayUpdateTask(void * pvParameters){
                     break;
                 }
             }
+
+        if(!local_mute)
+        {
+            u8g2.drawStr(65, 10, "Unmute");
+        }else
+        {
+            u8g2.drawStr(65, 10, "Mute");
+        }
 
         u8g2.sendBuffer();          // transfer internal memory to the display
 
