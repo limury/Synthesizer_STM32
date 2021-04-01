@@ -1,4 +1,4 @@
-
+#include <Arduino.h> 
 #include <U8g2lib.h>
 #include <Wire.h>
 #include <math.h>
@@ -6,6 +6,8 @@
 #include "src/main.h"
 //#include <stm32l4xx_hal.h>
 #include "pins.h"
+
+using namespace std;
 
 #define SOUND false
 #define DMA_REQUEST_DAC1_CH1 6U
@@ -106,7 +108,7 @@ public:
     push(value);
   }
 
-  ///return a tuple type. First tuple is key press (12bit) and 2nd is time(20bit) in milliseconds.
+  //return a tuple type. First tuple is key press (12bit) and 2nd is time(20bit) in milliseconds.
   tuple<uint32_t, uint32_t> readKeypressAndTime(int i){
     uint32_t value = readBuffer(i);
     return make_tuple( (value>>12) , (value  & 0b111111111111) );
@@ -184,6 +186,7 @@ namespace KeyVars{
     volatile uint64_t decoder_increments[12] = {0,0,0,0,0,0,0,0,0,0,0,0,};
     volatile uint8_t  knob_positions[4] = {0,0,0,0}; // position of each knob
     QueueHandle_t     message_out_queue;
+    volatile bool mute = false;
 }
 namespace Mutex{
     SemaphoreHandle_t increments_mutex;
@@ -206,9 +209,15 @@ namespace DMA {
         uint32_t local_pressed_keys = 0;
         uint8_t n_keys;
 
+        
         while(1){
             n_keys = 0;
             local_pressed_keys = __atomic_load_n( &KeyVars::pressed_keys, __ATOMIC_RELAXED);
+            bool local_mute =  __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
+            if(local_mute)
+            {
+              local_pressed_keys = local_pressed_keys & ~0b111111111111;
+            }
 
             // zero out the array
             memset( (void*) DMA::DMACurrBuffPtr, 0, sizeof(uint32_t)*HALF_BUFFER_SIZE );
@@ -224,6 +233,9 @@ namespace DMA {
                     }
                 }
             }
+
+
+
             for (uint32_t j = 0; j < HALF_BUFFER_SIZE; j++){
                 DMA::DMACurrBuffPtr[j] = DMA::DMACurrBuffPtr[j] >> (12 - (KeyVars::knob_positions[3]>>1));
             }
@@ -357,6 +369,18 @@ void scanKeysTask(void * pvParameters){
             }
         }
         last_pressed_keys = local_pressed_keys;
+
+
+        //update mute (knob 3 press)-------------------------------------------
+        uint8_t knob3_press = (local_pressed_keys >> 21) & 0b1;
+        uint8_t prev_knob3_press = (last_pressed_keys >> 21) & 0b1;
+        if(prev_knob3_press==1){
+          if(knob3_press==0){
+            bool local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
+            __atomic_store_n( &KeyVars::mute, !local_mute, __ATOMIC_RELAXED);
+          }
+        }
+        //---------------------------------------------------------------------
     }
 }
 
@@ -385,6 +409,16 @@ void displayUpdateTask(void * pvParameters){
                 }
             }
 
+        bool local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED );
+       
+        if(local_mute)
+        {
+          u8g2.drawStr(2, 10, "Mute");
+        }
+        else
+        {
+          u8g2.drawStr(2, 10, "Unmute");
+        }
         u8g2.sendBuffer();          // transfer internal memory to the display
 
     }
