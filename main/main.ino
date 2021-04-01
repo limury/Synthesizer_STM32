@@ -19,6 +19,117 @@ DMA_HandleTypeDef hdma_dac_ch1;
 
 TIM_HandleTypeDef htim2;
 
+
+//classes
+#define buffMaxSize 1000
+class buffer{
+
+private:
+  int maxSize = buffMaxSize;
+  uint32_t data[buffMaxSize];
+  uint32_t saved_data[buffMaxSize];
+  int saved_data_size = 0;
+  uint32_t currentPointer =0;
+  bool empty = true;
+
+public:
+  
+  
+  ///push data in. If successfully stored then return true otherwise if full then dont store and return false.
+  bool push(uint32_t value){
+    if(currentPointer  < maxSize  ){
+      currentPointer++;
+      data[currentPointer] = value;
+      if(empty){
+        empty = false;
+      }
+      return true;
+    }else{
+      return false;
+    }
+  };
+
+  ///returns data from head. If empty then return 0.
+  uint32_t pop(){
+    if(!empty){
+      if(currentPointer == 0){
+        empty = true;
+        return data[currentPointer];
+      }else{
+        currentPointer--;
+        return data[currentPointer + 1];
+      }
+    }else{
+      return 0;
+    }
+  }
+
+  
+  bool isEmpty(){
+    return empty;
+  }
+
+  uint32_t sizeOfbuffer(){
+    return currentPointer+1;
+  }
+
+  uint32_t sizeOfSaved(){
+    return saved_data_size;
+  }
+
+  uint32_t readBuffer(uint32_t i){
+    return data[i];
+  }
+
+  uint32_t read_saved_Buffer(uint32_t i){
+    return saved_data[i];
+  }
+
+  void save(){
+    memcpy ( &saved_data, &data, (currentPointer+1) * 4 );
+    saved_data_size = currentPointer+1;
+  }
+
+  void clear_buffer(){
+    empty = true;
+    currentPointer = 0;
+  }
+};
+
+class replayBuffer : public buffer
+{
+public:
+  ///input a 12 bit key presses and input time in millisecond. Time can be maximum of 20 bit number. If time is greater than 20bit then the last 12 msb gets cut off. If save not successful then return false otherwise true.
+  bool SaveKeyPress(uint32_t keys , uint32_t time ){
+
+    uint32_t value = (time << 12) + (keys & 0b111111111111);
+    push(value);
+  }
+
+  ///return a tuple type. First tuple is key press (12bit) and 2nd is time(20bit) in milliseconds.
+  tuple<uint32_t, uint32_t> readKeypressAndTime(int i){
+    uint32_t value = readBuffer(i);
+    return make_tuple( (value>>12) , (value  & 0b111111111111) );
+  }
+
+  ///return a tuple type. First tuple is saved key press (12bit) and 2nd is time(20bit) in milliseconds.
+  tuple<uint32_t, uint32_t> read_Saved_KeypressAndTime(int i){
+    uint32_t value = read_saved_Buffer(i);
+    return make_tuple( (value>>12) , (value  & 0b111111111111 ) );
+  }
+
+};
+//struct
+typedef struct displayInfoStruct{
+  uint8_t x;
+  uint8_t y;
+  uint8_t base;
+  uint8_t bool_clear;
+  uint32_t data;
+  
+}displayInfo_t;
+
+
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
