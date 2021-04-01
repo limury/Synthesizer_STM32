@@ -19,6 +19,17 @@ DMA_HandleTypeDef hdma_dac_ch1;
 
 TIM_HandleTypeDef htim2;
 
+
+typedef struct displayInfoStruct{
+  uint8_t x;
+  uint8_t y;
+  uint8_t base;
+  uint8_t bool_clear;
+  char data;
+  
+  
+}displayInfo_t;
+
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -35,7 +46,7 @@ void DMA_Buffer_End_ISR( DMA_HandleTypeDef* hdma );
 uint8_t decodeKnobChange(const uint8_t& state, const uint8_t& past_change);
 
 //Function to set outputs via matrix
-void setOutMuxBit(const uint8_t bitIdx, const bool value) {
+void setOutMuxBit(const uint8_t bitIdx, const uint8_t value) {
       digitalWrite(REN_PIN,LOW);
       digitalWrite(RA0_PIN, bitIdx & 0x01);
       digitalWrite(RA1_PIN, bitIdx & 0x02);
@@ -73,7 +84,11 @@ namespace KeyVars{
     volatile uint64_t decoder_increments[12] = {0,0,0,0,0,0,0,0,0,0,0,0,};
     volatile uint8_t  knob_positions[4] = {0,0,0,0}; // position of each knob
     QueueHandle_t     message_out_queue;
-    volatile bool mute = false;
+    QueueHandle_t display_q;
+    volatile uint8_t mute = false;
+    volatile uint8_t replay_countdown = false;
+    volatile uint8_t record = false;
+    volatile uint16_t overRideKeys = 0;
 }
 namespace Mutex{
     SemaphoreHandle_t increments_mutex;
@@ -96,7 +111,7 @@ namespace DMA {
         uint32_t local_pressed_keys = 0;
         uint8_t n_keys;
         uint8_t expanded_pressed_keys[12];
-        bool local_mute = false;
+        uint8_t local_mute = false;
 
         while(1){
             n_keys = 0;
@@ -211,6 +226,20 @@ namespace Utils{
                 return past_change * 2;
         }
     }
+    inline void printDisplayInfo(displayInfo_t* temp)
+    {
+        if( (temp->bool_clear) == 0){
+
+            u8g2.setCursor( (temp->x), (temp->y) );
+            //u8g2.print( (temp->data), (int)(temp->base) );
+            u8g2.print(temp->data);
+            u8g2.sendBuffer();  
+        }else
+        {
+            u8g2.clearBuffer();
+
+        }
+}; 
 
 }
 
@@ -218,8 +247,9 @@ namespace Utils{
 void scanKeysTask(void * pvParameters){
     uint32_t local_pressed_keys = 0, last_pressed_keys = 0;
     uint8_t local_knob_positions[4] = {0,0,0,0}, last_knob_states[4] = {0,0,0,0}, knob_states[4] = {0,0,0,0}, knob_changes[4] = {0,0,0,0};
-    bool local_mute = false;
-
+    uint8_t local_mute = false;
+    uint8_t local_replay_countdown = false;
+    uint8_t local_countdown = false;
     // setup interval timer
     const TickType_t xFrequency    = 20/portTICK_PERIOD_MS;
     TickType_t       xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
@@ -229,7 +259,13 @@ void scanKeysTask(void * pvParameters){
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
         // reading = onehot-encoded value with active keys = 1  ---------------
         local_pressed_keys = Utils::readKeys();
+        local_countdown = __atomic_load_n( &KeyVars::replay_countdown, __ATOMIC_RELAXED);
         
+        if(local_countdown)
+        {
+            local_pressed_keys  = ( local_pressed_keys & ~0b111111111111 ) + ( __atomic_load_n( &KeyVars::overRideKeys, __ATOMIC_RELAXED) & 0b111111111111 );
+        }
+
         __atomic_store_n( &KeyVars::pressed_keys, local_pressed_keys, __ATOMIC_RELAXED );
 
         // extract knob readings ----------------------------------------------
@@ -262,15 +298,27 @@ void scanKeysTask(void * pvParameters){
             }
         }
         //mute button on knob0 press
-        uint8_t knob3_press = (local_pressed_keys >> 24) & 0b1;
-        uint8_t prev_knob3_press = (last_pressed_keys >> 24) & 0b1;
-        if(prev_knob3_press==1){
-            if(knob3_press==0){
+        uint8_t knob0_press = (local_pressed_keys >> 24) & 0b1;
+        uint8_t prev_knob0_press = (last_pressed_keys >> 24) & 0b1;
+        if(prev_knob0_press==1){
+            if(knob0_press==0){
                 local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
                 __atomic_store_n( &KeyVars::mute, !local_mute, __ATOMIC_RELAXED);
             }
         }
-        prev_knob3_press = knob3_press;
+
+
+        //replay countdown
+        uint8_t knob3_press = (local_pressed_keys >> 21) & 0b1;
+        uint8_t prev_knob3_press = (last_pressed_keys >> 21) & 0b1;
+        if(prev_knob3_press==1){
+            if(knob3_press==0){
+                local_replay_countdown = __atomic_load_n( &KeyVars::replay_countdown, __ATOMIC_RELAXED);
+                __atomic_store_n( &KeyVars::replay_countdown, !local_mute, __ATOMIC_RELAXED);
+            }
+        }
+
+
 
         last_pressed_keys = local_pressed_keys;
     }
@@ -280,38 +328,55 @@ void displayUpdateTask(void * pvParameters){
     uint32_t local_pressed_keys = 0;
     // setup interval timer
     const TickType_t xFrequency = 100/portTICK_PERIOD_MS;
-    bool local_mute = 0;
+    uint8_t local_mute = 0;
+    uint8_t local_countdown;
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
+    displayInfo_t temp ;
+    
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
         local_pressed_keys = __atomic_load_n( &KeyVars::pressed_keys, __ATOMIC_RELAXED );
         local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
+        local_countdown = __atomic_load_n( &KeyVars::replay_countdown, __ATOMIC_RELAXED);
         // operate on display
-        u8g2.clearBuffer();         // clear the internal memory
-        u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
-
-        u8g2.drawStr(2, 10, "Volume: ");
-        u8g2.setCursor(50, 10);
-        u8g2.print(__atomic_load_n( &KeyVars::knob_positions[3], __ATOMIC_RELAXED ) );
-
-        u8g2.drawStr(2, 30, "Playing: ");
-
-        if ( local_pressed_keys & 0xFFF )
-            for (uint8_t i = 0; i < 12; i++){
-                if ( (local_pressed_keys >> i) & 0b1 ){
-                    u8g2.drawStr(50, 30, Sound::NOTE_NAMES[ i ] );
-                    break;
-                }
+        if(local_countdown)
+        {   
+            if(xQueueReceive(KeyVars::display_q, &temp, 0))
+            {
+                Utils::printDisplayInfo(&temp);  
             }
-
-        if(!local_mute)
-        {
-            u8g2.drawStr(65, 10, "Unmute");
+            
         }else
         {
-            u8g2.drawStr(65, 10, "Mute");
-        }
+            u8g2.clearBuffer();         // clear the internal memory
+            u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
 
-        u8g2.sendBuffer();          // transfer internal memory to the display
+            u8g2.drawStr(2, 10, "Volume: ");
+            u8g2.setCursor(50, 10);
+            u8g2.print(__atomic_load_n( &KeyVars::knob_positions[3], __ATOMIC_RELAXED ) );
+
+            u8g2.drawStr(2, 30, "Playing: ");
+
+            if ( local_pressed_keys & 0xFFF )
+                for (uint8_t i = 0; i < 12; i++){
+                    if ( (local_pressed_keys >> i) & 0b1 ){
+                        u8g2.drawStr(50, 30, Sound::NOTE_NAMES[ i ] );
+                        break;
+                    }
+                }
+
+            if(!local_mute)
+            {
+                u8g2.drawStr(65, 10, "Unmute");
+            }else
+            {
+                u8g2.drawStr(65, 10, "Mute");
+            }
+
+            u8g2.sendBuffer();          // transfer internal memory to the display
+        }
+        
+
+        
 
     }
 }
@@ -352,6 +417,54 @@ void serialDecoderTask(void * pvParameters){
         xSemaphoreTake( Mutex::decoder_increments_mutex, portMAX_DELAY ) ;
         memcpy( (void*) KeyVars::decoder_increments, local_decoder_increments, 12*sizeof(uint32_t) );
         xSemaphoreGive( Mutex::decoder_increments_mutex );
+    }
+}
+
+void replayCountDownTask(void * pvParameters){
+    const TickType_t xFrequency = 50/portTICK_PERIOD_MS;
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    while(1)
+    {
+        vTaskDelayUntil( &xLastWakeTime, xFrequency );  
+         
+        bool bob = __atomic_load_n( &KeyVars::replay_countdown, __ATOMIC_RELAXED );
+        if(bob){
+        Serial.println("count start");
+        displayInfo_t send;
+        send.x = 2;
+        send.y = 10;
+        send.data = '1';
+        send.base = 10;
+        send.bool_clear = 1;
+        xQueueSend(KeyVars::display_q, &send, portMAX_DELAY );
+
+        send.bool_clear = 0;
+        vTaskDelay(100/portTICK_PERIOD_MS);
+        xQueueSend(KeyVars::display_q, &send, portMAX_DELAY );
+        
+        __atomic_store_n( &KeyVars::overRideKeys, (0b1<<7), __ATOMIC_RELAXED);
+        vTaskDelay(300/portTICK_PERIOD_MS);
+        __atomic_store_n( &KeyVars::overRideKeys, 0b0, __ATOMIC_RELAXED);
+        vTaskDelay(700/portTICK_PERIOD_MS);
+        send.x = 12;
+        send.data = '2';
+        xQueueSend(KeyVars::display_q, &send, portMAX_DELAY );
+
+        __atomic_store_n( &KeyVars::overRideKeys, 0b1<<7, __ATOMIC_RELAXED);
+        vTaskDelay(300/portTICK_PERIOD_MS);
+        __atomic_store_n( &KeyVars::overRideKeys, 0b0, __ATOMIC_RELAXED);
+        vTaskDelay(700/portTICK_PERIOD_MS);
+        send.x = 22;
+        send.data = '3';
+        xQueueSend(KeyVars::display_q, &send, portMAX_DELAY );
+
+        __atomic_store_n( &KeyVars::overRideKeys, 0b1<<11, __ATOMIC_RELAXED);
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+        __atomic_store_n( &KeyVars::replay_countdown , false, __ATOMIC_RELAXED);
+        __atomic_store_n( &KeyVars::record , true, __ATOMIC_RELAXED);
+
+        Serial.println("countdown end");
+    }
     }
 }
 
@@ -412,10 +525,14 @@ void setup() {
     TaskHandle_t serialDecoderHandle = NULL;
     xTaskCreate( serialDecoderTask, "serialDecoder", 64, NULL, 3, &serialDecoderHandle );
 
+    TaskHandle_t replayCountDownHandle = NULL;
+    xTaskCreate( replayCountDownTask, "replayCountDown", 32, NULL, 2, &replayCountDownHandle );
+
     // declare mutexes and other structures
     Mutex::increments_mutex = xSemaphoreCreateMutex();
     Mutex::decoder_increments_mutex = xSemaphoreCreateMutex();
     KeyVars::message_out_queue = xQueueCreate( 12, 4 );
+    KeyVars::display_q = xQueueCreate( 5, 8 );
 
     // Register DMA Callbacks
     HAL_DMA_RegisterCallback( &hdma_dac_ch1, HAL_DMA_XFER_CPLT_CB_ID, &DMA::DMA_Buffer_End_Callback);
