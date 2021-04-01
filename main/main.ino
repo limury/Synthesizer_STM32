@@ -9,7 +9,7 @@
 
 #define SOUND false
 #define DMA_REQUEST_DAC1_CH1 6U
-#define BUFFER_SIZE 500
+#define BUFFER_SIZE 400
 #define HALF_BUFFER_SIZE BUFFER_SIZE/2 
 #define SHIFTED_HALF_BUFFER_SIZE HALF_BUFFER_SIZE<<24
 #define NSAM 256
@@ -94,33 +94,39 @@ namespace DMA {
         uint32_t out_sound = 0;
         uint32_t local_pressed_keys = 0;
         uint8_t n_keys;
+        uint8_t expanded_pressed_keys[12];
 
         while(1){
             n_keys = 0;
             local_pressed_keys = __atomic_load_n( &KeyVars::pressed_keys, __ATOMIC_RELAXED);
 
             // zero out the array
-            memset( (void*) DMA::DMACurrBuffPtr, 0, sizeof(uint32_t)*HALF_BUFFER_SIZE );
+            memset( (void*) DMA::DMAModifiableBuffer, 0, sizeof(uint32_t)*HALF_BUFFER_SIZE );
+            for (uint32_t i = 0; i < 12; i++){
+                expanded_pressed_keys[i] = (local_pressed_keys >> i) & 0b1;
+            }
 
         
             for (uint32_t i = 0; i < 12; i++){
-                if (((local_pressed_keys >> i) & 0b1)){
+                if ((local_pressed_keys >> i) & 0b1){
                     n_keys++;
                     uint32_t increment = Sound::SAMPLE_INCREMENTS_256[i];
                     for (uint32_t j = 0; j < HALF_BUFFER_SIZE; j++){
                         key_ptrs[i] += increment;
-                        DMA::DMACurrBuffPtr[j] += (Sound::SINE_WAVE_12_BIT_256[key_ptrs[i] >> 24]);
+                        DMA::DMAModifiableBuffer[j] += (Sound::SINE_WAVE_12_BIT_256[key_ptrs[i] >> 24]);
                     }
                 }
             }
-            for (uint32_t j = 0; j < HALF_BUFFER_SIZE; j++){
-                DMA::DMACurrBuffPtr[j] = DMA::DMACurrBuffPtr[j] >> (12 - (KeyVars::knob_positions[3]>>1));
+            if (n_keys){
+                for (uint32_t j = 0; j < HALF_BUFFER_SIZE; j++){
+                    DMA::DMAModifiableBuffer[j] = (DMA::DMAModifiableBuffer[j] >> (12 - (KeyVars::knob_positions[3]>>1)))/n_keys;
+                }
             }
 
 
             xTaskNotifyWait(pdFALSE, ULONG_MAX, NULL, portMAX_DELAY);
 
-            // memcpy( (void*) __atomic_load_n( &DMA::DMACurrBuffPtr, __ATOMIC_RELAXED ), (void*) DMA::DMAModifiableBuffer, HALF_BUFFER_SIZE*sizeof(uint32_t) );
+            memcpy( (void*) __atomic_load_n( &DMA::DMACurrBuffPtr, __ATOMIC_RELAXED ), (void*) DMA::DMAModifiableBuffer, HALF_BUFFER_SIZE*sizeof(uint32_t) );
 
             // this looks like it would need a semaphore to sync it since we are accessing DMA::DMALastBuffPtr twice
             // however there is no need because if DMACurrBuffPtr is updated while doing this it would cause an error on the next loop anyway.
@@ -290,9 +296,9 @@ void msgOutTask(void * pvParameters){
 
 void serialDecoderTask(void * pvParameters){
     uint8_t it = 0;
-    uint64_t local_decoder_increments[12] = {0,0,0,0,0,0,0,0,0,0,0,0,};
+    uint32_t local_decoder_increments[12] = {0,0,0,0,0,0,0,0,0,0,0,0,};
     // setup interval timer
-    const TickType_t xFrequency = 5/portTICK_PERIOD_MS;
+    const TickType_t xFrequency = 10/portTICK_PERIOD_MS;
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
         char in_msg[] = "xxx";
@@ -313,7 +319,7 @@ void serialDecoderTask(void * pvParameters){
             }
         }
         xSemaphoreTake( Mutex::decoder_increments_mutex, portMAX_DELAY ) ;
-        memcpy( (void*) KeyVars::decoder_increments, local_decoder_increments, 12*sizeof(uint64_t) );
+        memcpy( (void*) KeyVars::decoder_increments, local_decoder_increments, 12*sizeof(uint32_t) );
         xSemaphoreGive( Mutex::decoder_increments_mutex );
     }
 }
@@ -378,7 +384,7 @@ void setup() {
     // declare mutexes and other structures
     Mutex::increments_mutex = xSemaphoreCreateMutex();
     Mutex::decoder_increments_mutex = xSemaphoreCreateMutex();
-    KeyVars::message_out_queue = xQueueCreate( 8, 4 );
+    KeyVars::message_out_queue = xQueueCreate( 12, 4 );
 
     // Register DMA Callbacks
     HAL_DMA_RegisterCallback( &hdma_dac_ch1, HAL_DMA_XFER_CPLT_CB_ID, &DMA::DMA_Buffer_End_Callback);
