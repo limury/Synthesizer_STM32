@@ -655,12 +655,12 @@ void displayUpdateTask(void * pvParameters){
 
             if(LOAD(&KeyVars::record))
             {
-                u8g2.drawStr(55, 20, "Rec");
+                u8g2.drawFilledEllipse(95,25,3,3,U8G2_DRAW_ALL);
             }
 
             if(LOAD(&KeyVars::record_play))
             {
-                u8g2.drawStr(85, 20, "Play");
+                u8g2.drawTriangle(105,20,105,30,110,25);
             }
         
             // print waveform being played
