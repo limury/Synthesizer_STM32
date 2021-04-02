@@ -134,11 +134,6 @@ public:
   ///return a tuple type. First tuple is key press (12bit) and 2nd is time(20bit) in milliseconds.
   std::tuple<uint32_t, uint32_t> readKeypressAndTime(int i){
     uint32_t value = readBuffer(i);
-    //Serial.println("test");
-    /*
-    Serial.println(value>>12,BIN);
-    Serial.println(timey,DEC);
-*/
     return std::make_tuple(  (value  & 0b111111111111), (value>>12) );
   }
 
@@ -517,16 +512,13 @@ void scanKeysTask(void * pvParameters){
                 
                 if(local_record)
                 {
-                    Serial.println("record knob ");
                     local_record = false;
                     STORE(&KeyVars::record, local_record);
                 }else
                 {
-                    Serial.println("countdown 1 knob");
                     //__atomic_store_n( &KeyVars::replay_countdown, true, __ATOMIC_RELAXED);
                     //xTaskNotifyGive(TaskHandle::replayCountDownHandle);
                     __atomic_store_n( &KeyVars::record , true, __ATOMIC_RELAXED);
-                    Serial.println("countdown 2 knob ");
                 }
             }
         }
@@ -537,31 +529,18 @@ void scanKeysTask(void * pvParameters){
         //recording
         if(local_record)
         { 
-            Serial.println("record");
             _12keys = local_pressed_keys & 0xFFF;
             if(set_up)
             {
-                Serial.println("set up ");
-                Serial.println(set_up);
                 set_up = false;
                 record_buffer.clear_buffer();
                 last12keys = local_pressed_keys & 0xFFF;
                 last_time_changed = millis();
                 record_last_keyPress = true;
-                Serial.println(set_up);
             }else if(_12keys != last12keys)
             {
-                Serial.println("record1");
                 uint32_t time = millis();
                 record_buffer.SaveKeyPress( last12keys , time - last_time_changed ); 
-                
-                uint32_t keysy,timey;
-                std::tie(keysy, timey) = record_buffer.readKeypressAndTime( record_buffer.currentPointerVal() );
-                Serial.println(keysy,BIN);
-                Serial.println(timey,DEC);
-                Serial.println("record2");
-                Serial.println(last12keys,BIN);
-                Serial.println(time - last_time_changed,DEC);
                 last_time_changed = time;
                 last12keys = _12keys;
                 
@@ -570,7 +549,6 @@ void scanKeysTask(void * pvParameters){
         {
             record_buffer.SaveKeyPress( last12keys, millis() - last_time_changed);        
             record_last_keyPress = false; 
-            Serial.println("last record");
             set_up = true;
             record_buffer.save();
             xTaskNotifyGive(TaskHandle::replayHandle);
@@ -634,7 +612,6 @@ void displayUpdateTask(void * pvParameters){
             {
                 Utils::printDisplayInfo(&temp);  
             }
-            Serial.println("end of display countdown");
         }else
         {
             local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
@@ -789,17 +766,13 @@ void replay(void * pvParameters){
         {
             STORE(&KeyVars::overRideKeyAdd, true);
             STORE(&KeyVars::record_play, true);
-            Serial.println(record_buffer.sizeOfSaved());
             for(int i = 0 ; i < record_buffer.sizeOfSaved() ; i++)
             {         
                 std::tie(keys, time) = record_buffer.read_Saved_KeypressAndTime(i);
-                Serial.println(keys,BIN);
-                Serial.println(time,DEC);
                 __atomic_store_n( &KeyVars::overRideKeys, keys, __ATOMIC_RELAXED);
                 vTaskDelay(time / portTICK_PERIOD_MS);
             }
             STORE(&KeyVars::overRideKeyAdd, false);
-            Serial.println("end of playing");
             STORE(&KeyVars::record_play, false);
         }
     }
