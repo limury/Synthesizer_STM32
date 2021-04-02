@@ -106,11 +106,7 @@ public:
     saved_data_size = currentPointer + 1;
     savedEmpty = false;
     memcpy ( &saved_data, &data, saved_data_size * 4 );
-    /*
-    for(int i = 0 ; i < saved_data_size ; i++)
-    {
-        saved_data[i] = data[i];
-    }*/
+
   }
 
   void clear_buffer(){
@@ -151,7 +147,7 @@ public:
 typedef struct displayInfoStruct{
   uint8_t x;
   uint8_t y;
-  //uint8_t base;
+
   char data;
   uint8_t bool_clear;
 }displayInfo_t;
@@ -330,7 +326,7 @@ namespace DMA {
             memcpy( (void*) LOAD( &DMA::DMACurrBuffPtr ), (void*) DMA::DMAModifiableBuffer, HALF_BUFFER_SIZE*sizeof(uint32_t) );
 
             if (DMA::DMALastBuffPtr == LOAD(&DMA::DMACurrBuffPtr) ){
-                // Serial.println("Error: Out of sync DMA");
+               
                 digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
             }
             DMA::DMALastBuffPtr = DMA::DMACurrBuffPtr;
@@ -418,7 +414,7 @@ namespace Utils{
         if( (temp->bool_clear) == 0){
 
             u8g2.setCursor( (temp->x), (temp->y) );
-            //u8g2.print( (temp->data), (int)(temp->base) );
+            
             u8g2.print(temp->data);
             u8g2.sendBuffer();  
         }else
@@ -511,7 +507,7 @@ void scanKeysTask(void * pvParameters){
         uint8_t prev_knob3_press = (last_pressed_keys >> 21) & 0b1;
         if(prev_knob3_press==1){
             if(knob3_press==0){
-                //local_replay_countdown = __atomic_load_n( &KeyVars::replay_countdown, __ATOMIC_RELAXED);
+                
                 
                 if(local_record)
                 {
@@ -519,8 +515,6 @@ void scanKeysTask(void * pvParameters){
                     STORE(&KeyVars::record, local_record);
                 }else
                 {
-                    //__atomic_store_n( &KeyVars::replay_countdown, true, __ATOMIC_RELAXED);
-                    //xTaskNotifyGive(TaskHandle::replayCountDownHandle);
                     __atomic_store_n( &KeyVars::record , true, __ATOMIC_RELAXED);
                 }
             }
@@ -629,7 +623,7 @@ void displayUpdateTask(void * pvParameters){
             u8g2.drawStr(2, 10, "Vol: ");
             u8g2.setCursor(27, 10);
             u8g2.print(LOAD( &KeyVars::volume_knob_position ) );
-            //u8g2.drawStr(2, 30, "Playing: ");
+            
 
             // print note being played on keyboard
             u8g2.drawStr(2, 20, "Note: ");
@@ -716,55 +710,7 @@ void serialDecoderTask(void * pvParameters){
     }
 }
 
-/*
-void replayCountDownTask(void * pvParameters){
-    
-    const TickType_t xFrequency = 50/portTICK_PERIOD_MS;
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    while(1)
-    {
-        //vTaskDelayUntil( &xLastWakeTime, xFrequency );  
-        uint8_t start = ulTaskNotifyTake( pdTRUE, (TickType_t) portMAX_DELAY );
-        //uint8_t start = LOAD(&KeyVars::replay_countdown)
-        Serial.println("count start up");
-        //bool start = __atomic_load_n( &KeyVars::replay_countdown, __ATOMIC_RELAXED );
-        if(start > 0){
-            Serial.println("count start");
-            displayInfo_t send = {2, 10 , '3' , 1};
 
-            xQueueSend(KeyVars::display_q, &send, portMAX_DELAY );
-            
-            send.bool_clear = 0;
-            vTaskDelay(100/portTICK_PERIOD_MS);
-            xQueueSend(KeyVars::display_q, &send, portMAX_DELAY );
-            
-            __atomic_store_n( &KeyVars::overRideKeys, (0b1<<7), __ATOMIC_RELAXED);
-            vTaskDelay(300/portTICK_PERIOD_MS);
-            __atomic_store_n( &KeyVars::overRideKeys, 0b0, __ATOMIC_RELAXED);
-            vTaskDelay(700/portTICK_PERIOD_MS);
-
-            send.x = 12;
-            send.data = '2';
-            xQueueSend(KeyVars::display_q, &send, portMAX_DELAY );
-            __atomic_store_n( &KeyVars::overRideKeys, 0b1<<7, __ATOMIC_RELAXED);
-            vTaskDelay(300/portTICK_PERIOD_MS);
-            __atomic_store_n( &KeyVars::overRideKeys, 0b0, __ATOMIC_RELAXED);
-            vTaskDelay(700/portTICK_PERIOD_MS);
-
-            send.x = 22;
-            send.data = '1';
-            xQueueSend(KeyVars::display_q, &send, portMAX_DELAY );
-            __atomic_store_n( &KeyVars::overRideKeys, 0b1<<11, __ATOMIC_RELAXED);
-            vTaskDelay(1000/portTICK_PERIOD_MS);
-
-            __atomic_store_n( &KeyVars::replay_countdown , false, __ATOMIC_RELAXED);
-            __atomic_store_n( &KeyVars::record , true, __ATOMIC_RELAXED);
-
-            Serial.println("countdown end");
-    }
-    }
-}
-*/
 void replay(void * pvParameters){
     uint32_t keys,time ;
     while(1){
@@ -861,7 +807,6 @@ void setup() {
     xTaskCreate( serialDecoderTask, "serialDecoder", 64, NULL, 4, &serialDecoderHandle );
 
     
-    //xTaskCreate( replayCountDownTask, "replayCountDown", 32, NULL, 2, &TaskHandle::replayCountDownHandle );
 
     xTaskCreate( replay, "record", 32, NULL, 2, &TaskHandle::replayHandle );
 
@@ -890,8 +835,7 @@ void loop() {
 
     //Update display
     while(1){
-        //digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-        //delayMicroseconds(1000000);
+
     }
 }
 
@@ -900,7 +844,7 @@ void DMA1_Channel3_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Channel3_IRQn 0 */
   /* USER CODE END DMA1_Channel3_IRQn 0 */
-//   digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+
   HAL_DMA_IRQHandler(&hdma_dac_ch1);
   /* USER CODE BEGIN DMA1_Channel3_IRQn 1 */
 
