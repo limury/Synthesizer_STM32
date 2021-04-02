@@ -26,137 +26,8 @@ DMA_HandleTypeDef hdma_dac_ch1;
 TIM_HandleTypeDef htim2;
 
 
-#define buffMaxSize 1000
-class buffer{
+#define RECORDING_BUFFER_MAX_SIZE 1000
 
-private:
-  int maxSize = buffMaxSize;
-  uint32_t data[buffMaxSize];
-  uint32_t saved_data[buffMaxSize];
-  int saved_data_size = 0;
-  uint32_t currentPointer =0;
-  bool empty = true;
-  bool savedEmpty = true;
-  bool full = false;
-
-public:
-  
-  
-  ///push data in. If successfully stored then return true otherwise if full then dont store and return false.
-    bool push(uint32_t value){
-        if(currentPointer  < maxSize -1 )
-        {  
-      
-        if(empty){
-            empty = false;
-        }else{
-            currentPointer++;
-        }
-        data[currentPointer] = value;
-        return true;
-        
-        }
-        else{
-            full = true;
-            return false;
-        }
-    };
-
-  ///returns data from head. If empty then return 0.
-  uint32_t pop(){
-    if(!empty){
-      if(currentPointer == 0){
-        empty = true;
-        return data[currentPointer];
-      }else{
-        currentPointer--;
-        return data[currentPointer + 1];
-      }
-    }else{
-      return 0;
-    }
-  }
-
-  
-  bool isEmpty(){
-    return empty;
-  }
-
-  bool isSavedEmpty(){
-      return savedEmpty;
-  }
-
-  uint32_t sizeOfbuffer(){
-    return currentPointer + 1;
-  }
-
-  uint32_t sizeOfSaved(){
-    return saved_data_size;
-  }
-
-  uint32_t readBuffer(uint32_t i){
-    return data[i];
-  }
-
-  uint32_t read_saved_Buffer(uint32_t i){
-    return saved_data[i];
-  }
-
-  void save(){
-    saved_data_size = currentPointer + 1;
-    savedEmpty = false;
-    memcpy ( &saved_data, &data, saved_data_size * 4 );
-    /*
-    for(int i = 0 ; i < saved_data_size ; i++)
-    {
-        saved_data[i] = data[i];
-    }*/
-  }
-
-  void clear_buffer(){
-    empty = true;
-    full = false;
-    currentPointer = 0;
-  }
-
-  uint32_t currentPointerVal(){
-      return currentPointer;
-  }
-  
-};
-
-class replayBuffer : public buffer
-{
-public:
-  ///input a 12 bit key presses and input time in millisecond. Time can be maximum of 20 bit number. If time is greater than 20bit then the last 12 msb gets cut off. If save not successful then return false otherwise true.
-  bool SaveKeyPress(uint32_t keys , uint32_t time ){
-    uint32_t value = (time << 12) + (keys & 0xFFF);
-    return push(value);
-  }
-
-  ///return a tuple type. First tuple is key press (12bit) and 2nd is time(20bit) in milliseconds.
-  std::tuple<uint32_t, uint32_t> readKeypressAndTime(int i){
-    uint32_t value = readBuffer(i);
-    return std::make_tuple(  (value  & 0b111111111111), (value>>12) );
-  }
-
-  ///return a tuple type. First tuple is saved key press (12bit) and 2nd is time(20bit) in milliseconds.
-  std::tuple<uint32_t, uint32_t> read_Saved_KeypressAndTime(int i){
-    uint32_t value = read_saved_Buffer(i);
-    return std::make_tuple( (value & 0b111111111111 ), (value>>12) );
-  }
-
-};
-
-typedef struct displayInfoStruct{
-  uint8_t x;
-  uint8_t y;
-  //uint8_t base;
-  char data;
-  uint8_t bool_clear;
-}displayInfo_t;
-
-replayBuffer record_buffer;
 
 /* USER CODE BEGIN PV */
 
@@ -172,6 +43,8 @@ static void MX_TIM2_Init(void);
 void DMA1_Channel3_IRQHandler(void);
 void DMA_Buffer_End_ISR( DMA_HandleTypeDef* hdma );
 uint8_t decodeKnobChange(const uint8_t& state, const uint8_t& past_change);
+class Buffer;
+class ReplayBuffer;
 
 //Function to set outputs via matrix
 void setOutMuxBit(const uint8_t bitIdx, const uint8_t value) {
@@ -210,19 +83,89 @@ namespace KeyVars{
     volatile uint8_t  decoder_key_array[12] = {0};
     QueueHandle_t     message_out_queue;
 
-    QueueHandle_t display_q;
     volatile uint8_t mute = false;
-    volatile uint8_t replay_countdown = false;
-    volatile uint8_t record = false;
-    volatile uint8_t record_play = false;
-    volatile uint8_t overRideKeyAdd = false;
-    volatile uint16_t overRideKeys = 0;
     volatile uint8_t  current_wave_idx = 0;
-
 }
+
 namespace Mutex{
     SemaphoreHandle_t key_array_mutex;
     SemaphoreHandle_t decoder_key_array_mutex;
+}
+
+class Buffer{
+
+  private:
+    uint32_t data[RECORDING_BUFFER_MAX_SIZE];
+    uint32_t saved_data[RECORDING_BUFFER_MAX_SIZE];
+    uint16_t saved_data_size;
+    uint16_t current_pointer;
+    uint32_t empty;
+    uint32_t saved_empty;
+    uint32_t full;
+
+  public:
+    Buffer(): saved_data_size(0), current_pointer(0), empty(true), saved_empty(true), full(false) {}
+
+  ///push data in. If successfully stored then return true otherwise if full then dont store and return false.
+    bool push(uint32_t value){
+        if(current_pointer  < RECORDING_BUFFER_MAX_SIZE -1 ) { 
+            if (!empty)
+                current_pointer++;
+            empty = false;
+            data[current_pointer] = value;
+            return true;
+        }
+        else{
+            full = true;
+            return false;
+        }
+    };
+
+
+  bool issavedEmpty(){ return saved_empty; }
+
+  uint32_t sizeOfSaved(){ return saved_data_size; }
+
+  uint32_t readSavedBuffer(const uint32_t& i){ return saved_data[i]; }
+
+  void save(){
+    saved_data_size = current_pointer + 1;
+    saved_empty = false;
+    memcpy ( &saved_data, &data, saved_data_size * 4 );
+  }
+
+  void clearBuffer(){
+    empty = true;
+    full = false;
+    current_pointer = 0;
+  }
+};
+
+class ReplayBuffer : public Buffer
+{
+  public:
+    ReplayBuffer(): Buffer(){}
+
+    ///input a 12 bit key presses and input time in millisecond. Time can be maximum of 20 bit number. If time is greater than 20bit then the last 12 msb gets cut off. If save not successful then return false otherwise true.
+    bool saveKeyPress(const uint32_t& keys , const uint32_t& time ){
+      uint32_t value = (time << 12) + (keys & 0xFFF);
+      return push(value);
+    }
+
+    ///return a tuple type. First tuple is saved key press (12bit) and 2nd is time(20bit) in milliseconds.
+    void readSavedKeypressAndTime(const uint32_t& i, uint32_t& val, uint32_t& time){
+      uint32_t value = readSavedBuffer(i);        
+      val = value & 0b111111111111; 
+      time = (value>>12);
+    }
+
+};
+namespace Recording{
+    ReplayBuffer record_buffer;
+    volatile uint8_t record_play = false;
+    volatile uint8_t record = false;
+    volatile uint8_t override_key_add = false;
+    volatile uint16_t override_keys = 0;
 }
 
 namespace DMA {
@@ -252,14 +195,16 @@ namespace DMA {
             n_keys = 0;
             local_pressed_keys = LOAD( &KeyVars::pressed_keys );
 
-            xSemaphoreTake( Mutex::decoder_key_array_mutex, portMAX_DELAY);
-            memcpy( &local_decoder_key_array, (uint8_t*) &KeyVars::decoder_key_array, 12*sizeof(uint8_t) );
-            xSemaphoreGive( Mutex::decoder_key_array_mutex );
+            if(xSemaphoreTake( Mutex::decoder_key_array_mutex, 2/portTICK_PERIOD_MS)){
+                memcpy( &local_decoder_key_array, (uint8_t*) &KeyVars::decoder_key_array, 12*sizeof(uint8_t) );
+                xSemaphoreGive( Mutex::decoder_key_array_mutex );
+            }
+            else{
+                digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+            }
 
             if(LOAD(&KeyVars::mute))
-            {
                 local_pressed_keys = local_pressed_keys & ~0xFFF;
-            }
             
             // zero out the array
             memset( (void*) DMA::DMAModifiableBuffer, 0, sizeof(uint32_t)*HALF_BUFFER_SIZE );
@@ -330,7 +275,6 @@ namespace DMA {
             memcpy( (void*) LOAD( &DMA::DMACurrBuffPtr ), (void*) DMA::DMAModifiableBuffer, HALF_BUFFER_SIZE*sizeof(uint32_t) );
 
             if (DMA::DMALastBuffPtr == LOAD(&DMA::DMACurrBuffPtr) ){
-                // Serial.println("Error: Out of sync DMA");
                 digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
             }
             DMA::DMALastBuffPtr = DMA::DMACurrBuffPtr;
@@ -346,7 +290,6 @@ namespace DMA {
         xTaskNotifyFromISR( DMA::xDMATaskHandle, 0, eNoAction, &xHigherPriorityTaskWoken );
         portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
     }
-
     void DMA_Buffer_Half_Callback( DMA_HandleTypeDef* hdma ){
         __atomic_store_n( &DMA::DMACurrBuffPtr, (uint32_t*) DMA::DMABuffer, __ATOMIC_RELAXED );
 
@@ -358,14 +301,6 @@ namespace DMA {
 }
 
 
-namespace Recording{
-    class Recorder{
-      public:
-        Recorder(){
-
-        }
-    };
-}
 
 namespace Utils{
     // reads all bits in a certain row of the pin matrix
@@ -379,7 +314,8 @@ namespace Utils{
         static const int pins [] = {RA0_PIN, RA1_PIN, RA2_PIN};
         for (uint8_t i = 0; i < 3; i++)
             digitalWrite( pins[i], (row >> i) & 1 );
-        digitalWrite(REN_PIN, 1); }
+        digitalWrite(REN_PIN, 1); 
+    }
 
     inline uint32_t readKeys(){
         uint32_t reading = 0;
@@ -413,26 +349,10 @@ namespace Utils{
                 return past_change * 2;
         }
     }
-    inline void printDisplayInfo(displayInfo_t* temp)
-    {
-        if( (temp->bool_clear) == 0){
-
-            u8g2.setCursor( (temp->x), (temp->y) );
-            //u8g2.print( (temp->data), (int)(temp->base) );
-            u8g2.print(temp->data);
-            u8g2.sendBuffer();  
-        }else
-        {
-            u8g2.clearBuffer();
-
-        }
-}; 
 
 }
 
 namespace TaskHandle{
-
-    inline TaskHandle_t replayCountDownHandle = NULL;
     inline TaskHandle_t replayHandle = NULL;
 }
 
@@ -443,11 +363,9 @@ void scanKeysTask(void * pvParameters){
     uint8_t local_knob_positions[4] = {0,0,0,0}, last_knob_states[4] = {0,0,0,0}, knob_states[4] = {0,0,0,0}, knob_changes[4] = {0,0,0,0};
 
     uint8_t local_mute = false;
-    uint8_t local_replay_countdown = false;
-    uint8_t local_countdown = false;
     uint8_t local_record = false;
     uint8_t set_up = true;
-    uint8_t record_last_keyPress = false;
+    uint8_t record_last_keypress = false;
     uint8_t local_overRide = false;
     uint32_t last_time_changed = 0;
     uint8_t local_volume_knob_position = 0, last_volume_knob_state = 0, volume_knob_state = 0, volume_knob_change = 0;
@@ -462,33 +380,23 @@ void scanKeysTask(void * pvParameters){
         // reading = onehot-encoded value with active keys = 1  ---------------
         local_pressed_keys = Utils::readKeys();
 
-        local_countdown = __atomic_load_n( &KeyVars::replay_countdown, __ATOMIC_RELAXED);
-        local_record = LOAD(&KeyVars::record);
-        local_overRide = LOAD(&KeyVars::overRideKeyAdd);
-        if(local_countdown)
-        {
-            local_pressed_keys  = ( local_pressed_keys & ~0xFFF ) + ( __atomic_load_n( &KeyVars::overRideKeys, __ATOMIC_RELAXED) & 0xFFF );
-        }else if(local_overRide)
-        {
-            local_pressed_keys = local_pressed_keys | ( __atomic_load_n( &KeyVars::overRideKeys, __ATOMIC_RELAXED) & 0xFFF );
-        }
+        local_record = LOAD(&Recording::record);
+        local_overRide = LOAD(&Recording::override_key_add);
+        if(local_overRide)
+            local_pressed_keys = local_pressed_keys | ( LOAD( &Recording::override_keys ) & 0xFFF );
 
         STORE( &KeyVars::pressed_keys, local_pressed_keys );
 
-        
-
-        // set pointer increment size and update message-------------------------------------------------------------
+        // update message-------------------------------------------------------------
         uint32_t pressed_differences = local_pressed_keys ^ last_pressed_keys; // find differences 
         for (uint8_t i = 0; i < 12; i++){
             if ( (pressed_differences >> i) & 0b1 ){ // means there have been changes to this key
                 // create message and update increments------------------------
                 char tmp_message[4] = "xxx";
-                if ( (local_pressed_keys >> i) & 0b1 ){ // means the transition was from unplayed to played
+                if ( (local_pressed_keys >> i) & 0b1 ) // means the transition was from unplayed to played
                     tmp_message[0] = 'P';
-                }
-                else {
+                else 
                     tmp_message[0] = 'R';
-                }
                 tmp_message[1] = '4';
                 tmp_message[2] = Sound::INT_TO_HEX[i];
                 xQueueSend( KeyVars::message_out_queue, tmp_message, portMAX_DELAY );
@@ -498,65 +406,46 @@ void scanKeysTask(void * pvParameters){
         //mute button on knob0 press
         uint8_t knob0_press = (local_pressed_keys >> 24) & 0b1;
         uint8_t prev_knob0_press = (last_pressed_keys >> 24) & 0b1;
-        if(prev_knob0_press==1){
-            if(knob0_press==0){
-                local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
-                __atomic_store_n( &KeyVars::mute, !local_mute, __ATOMIC_RELAXED);
-            }
+        if(prev_knob0_press==1 && knob0_press==0){
+            local_mute = LOAD( &KeyVars::mute);
+            STORE( &KeyVars::mute, !local_mute);
         }
-
 
         //replay knob3 press
         uint8_t knob3_press = (local_pressed_keys >> 21) & 0b1;
         uint8_t prev_knob3_press = (last_pressed_keys >> 21) & 0b1;
-        if(prev_knob3_press==1){
-            if(knob3_press==0){
-                //local_replay_countdown = __atomic_load_n( &KeyVars::replay_countdown, __ATOMIC_RELAXED);
-                
-                if(local_record)
-                {
-                    local_record = false;
-                    STORE(&KeyVars::record, local_record);
-                }else
-                {
-                    //__atomic_store_n( &KeyVars::replay_countdown, true, __ATOMIC_RELAXED);
-                    //xTaskNotifyGive(TaskHandle::replayCountDownHandle);
-                    __atomic_store_n( &KeyVars::record , true, __ATOMIC_RELAXED);
-                }
-            }
+        if(prev_knob3_press==1 && knob3_press==0){
+            if(local_record) {
+                local_record = false;
+                STORE(&Recording::record, local_record);
+            }else 
+                STORE( &Recording::record , true);
         }
-        
-
-       
 
         //recording
-        if(local_record)
-        { 
+        if(local_record) { 
             _12keys = local_pressed_keys & 0xFFF;
-            if(set_up)
-            {
+            if(set_up) {
                 set_up = false;
-                record_buffer.clear_buffer();
+                Recording::record_buffer.clearBuffer();
                 last12keys = _12keys;
                 last_time_changed = millis();
-                record_last_keyPress = true;
+                record_last_keypress = true;
             }else if(_12keys != last12keys)
             {
                 uint32_t time = millis();
-                if( !record_buffer.SaveKeyPress( last12keys , time - last_time_changed )  ){
-                    STORE(&KeyVars::record, false);
+                if( !Recording::record_buffer.saveKeyPress( last12keys , time - last_time_changed )  ){
+                    STORE(&Recording::record, false);
                 }
                 last_time_changed = time;
                 last12keys = _12keys;
                 
             }
-        }else if(record_last_keyPress)
-        {
-
-            record_buffer.SaveKeyPress( last12keys, millis() - last_time_changed);        
-            record_last_keyPress = false; 
+        }else if(record_last_keypress) {
+            Recording::record_buffer.saveKeyPress( last12keys, millis() - last_time_changed);        
+            record_last_keypress = false; 
             set_up = true;
-            record_buffer.save();
+            Recording::record_buffer.save();
             xTaskNotifyGive(TaskHandle::replayHandle);
         }
 
@@ -565,7 +454,7 @@ void scanKeysTask(void * pvParameters){
         uint8_t prev_knob2_press = (last_pressed_keys >> 20) & 0b1;
         if(prev_knob2_press==1){
             if(knob2_press==0){
-                if( !LOAD(&KeyVars::record_play) & !record_buffer.isSavedEmpty() )
+                if( !LOAD(&Recording::record_play) & !Recording::record_buffer.issavedEmpty() )
                 {
                     xTaskNotifyGive(TaskHandle::replayHandle);
                 }
@@ -603,74 +492,59 @@ void displayUpdateTask(void * pvParameters){
     // setup interval timer
     const TickType_t xFrequency = 100/portTICK_PERIOD_MS;
     uint8_t local_mute = 0;
-    uint8_t local_countdown;
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
-    displayInfo_t temp;
     int note_pos = 35;
     
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
         
-        local_countdown = __atomic_load_n( &KeyVars::replay_countdown, __ATOMIC_RELAXED);
         // operate on display
-        if(local_countdown)
-        {   
-            if(xQueueReceive(KeyVars::display_q, &temp, 0))
-            {
-                Utils::printDisplayInfo(&temp);  
+        local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
+        local_pressed_keys = LOAD( &KeyVars::pressed_keys );
+        u8g2.clearBuffer();         // clear the internal memory
+        u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
+
+        u8g2.drawStr(2, 10, "Vol: ");
+        u8g2.setCursor(27, 10);
+        u8g2.print(LOAD( &KeyVars::volume_knob_position ) );
+        //u8g2.drawStr(2, 30, "Playing: ");
+
+        // print note being played on keyboard
+        u8g2.drawStr(2, 20, "Note: ");
+        if ( local_pressed_keys & 0xFFF ) {
+            note_pos = 35;
+            for (uint8_t i = 0; i < 12; i++) {
+                if ( (local_pressed_keys >> i) & 0b1 ){
+                    u8g2.drawStr(note_pos, 20, Sound::NOTE_NAMES[ i ] );
+                    note_pos += 15;
+                }
             }
+        } 
+
+        if(!local_mute) {
+            u8g2.drawStr(75, 10, "Unmute");
         }else
         {
-            local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
-            local_pressed_keys = LOAD( &KeyVars::pressed_keys );
-            u8g2.clearBuffer();         // clear the internal memory
-            u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
-
-            u8g2.drawStr(2, 10, "Vol: ");
-            u8g2.setCursor(27, 10);
-            u8g2.print(LOAD( &KeyVars::volume_knob_position ) );
-            //u8g2.drawStr(2, 30, "Playing: ");
-
-            // print note being played on keyboard
-            u8g2.drawStr(2, 20, "Note: ");
-            if ( local_pressed_keys & 0xFFF )
-            {
-                note_pos = 35;
-                for (uint8_t i = 0; i < 12; i++)
-                {
-                    if ( (local_pressed_keys >> i) & 0b1 ){
-                        u8g2.drawStr(note_pos, 20, Sound::NOTE_NAMES[ i ] );
-                        note_pos += 15;
-                    }
-                }
-            } 
-
-            if(!local_mute)
-            {
-                u8g2.drawStr(75, 10, "Unmute");
-            }else
-            {
-                u8g2.drawStr(75, 10, "Mute");
-            }
-
-            if(LOAD(&KeyVars::record))
-            {
-                u8g2.drawFilledEllipse(95,25,3,3,U8G2_DRAW_ALL);
-            }
-
-            if(LOAD(&KeyVars::record_play))
-            {
-                u8g2.drawTriangle(105,20,105,30,110,25);
-            }
-        
-            // print waveform being played
-            u8g2.drawStr(2, 30, "Wave: ");
-            u8g2.setCursor(40, 30);
-            u8g2.print( sound_wave_names[ LOAD(&KeyVars::current_wave_idx) ]);
-
-
-            u8g2.sendBuffer();          // transfer internal memory to the display
+            u8g2.drawStr(75, 10, "Mute");
         }
+
+        if(LOAD(&Recording::record))
+        {
+            u8g2.drawStr(55, 20, "Rec");
+        }
+
+        if(LOAD(&Recording::record_play))
+        {
+            u8g2.drawStr(85, 20, "Play");
+        }
+        
+        // print waveform being played
+        u8g2.drawStr(2, 30, "Wave: ");
+        u8g2.setCursor(40, 30);
+        u8g2.print( sound_wave_names[ LOAD(&KeyVars::current_wave_idx) ]);
+
+
+        u8g2.sendBuffer();          // transfer internal memory to the display
     }
 }
 
@@ -716,72 +590,23 @@ void serialDecoderTask(void * pvParameters){
     }
 }
 
-/*
-void replayCountDownTask(void * pvParameters){
-    
-    const TickType_t xFrequency = 50/portTICK_PERIOD_MS;
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    while(1)
-    {
-        //vTaskDelayUntil( &xLastWakeTime, xFrequency );  
-        uint8_t start = ulTaskNotifyTake( pdTRUE, (TickType_t) portMAX_DELAY );
-        //uint8_t start = LOAD(&KeyVars::replay_countdown)
-        Serial.println("count start up");
-        //bool start = __atomic_load_n( &KeyVars::replay_countdown, __ATOMIC_RELAXED );
-        if(start > 0){
-            Serial.println("count start");
-            displayInfo_t send = {2, 10 , '3' , 1};
-
-            xQueueSend(KeyVars::display_q, &send, portMAX_DELAY );
-            
-            send.bool_clear = 0;
-            vTaskDelay(100/portTICK_PERIOD_MS);
-            xQueueSend(KeyVars::display_q, &send, portMAX_DELAY );
-            
-            __atomic_store_n( &KeyVars::overRideKeys, (0b1<<7), __ATOMIC_RELAXED);
-            vTaskDelay(300/portTICK_PERIOD_MS);
-            __atomic_store_n( &KeyVars::overRideKeys, 0b0, __ATOMIC_RELAXED);
-            vTaskDelay(700/portTICK_PERIOD_MS);
-
-            send.x = 12;
-            send.data = '2';
-            xQueueSend(KeyVars::display_q, &send, portMAX_DELAY );
-            __atomic_store_n( &KeyVars::overRideKeys, 0b1<<7, __ATOMIC_RELAXED);
-            vTaskDelay(300/portTICK_PERIOD_MS);
-            __atomic_store_n( &KeyVars::overRideKeys, 0b0, __ATOMIC_RELAXED);
-            vTaskDelay(700/portTICK_PERIOD_MS);
-
-            send.x = 22;
-            send.data = '1';
-            xQueueSend(KeyVars::display_q, &send, portMAX_DELAY );
-            __atomic_store_n( &KeyVars::overRideKeys, 0b1<<11, __ATOMIC_RELAXED);
-            vTaskDelay(1000/portTICK_PERIOD_MS);
-
-            __atomic_store_n( &KeyVars::replay_countdown , false, __ATOMIC_RELAXED);
-            __atomic_store_n( &KeyVars::record , true, __ATOMIC_RELAXED);
-
-            Serial.println("countdown end");
-    }
-    }
-}
-*/
-void replay(void * pvParameters){
-    uint32_t keys,time ;
+void replayTask(void * pvParameters){
+    uint32_t keys, time;
     while(1){
         uint8_t start = ulTaskNotifyTake( pdTRUE, (TickType_t) portMAX_DELAY );
         if(start > 0)
         {
-            STORE(&KeyVars::overRideKeyAdd, true);
-            STORE(&KeyVars::record_play, true);
+            STORE(&Recording::override_key_add, true);
+            STORE(&Recording::record_play, true);
 
-            for(int i = 0 ; i < record_buffer.sizeOfSaved() ; i++)
+            for(int i = 0 ; i < Recording::record_buffer.sizeOfSaved() ; i++)
             {         
-                std::tie(keys, time) = record_buffer.read_Saved_KeypressAndTime(i);
-                __atomic_store_n( &KeyVars::overRideKeys, keys, __ATOMIC_RELAXED);
+                Recording::record_buffer.readSavedKeypressAndTime(i, keys, time);
+                __atomic_store_n( &Recording::override_keys, keys, __ATOMIC_RELAXED);
                 vTaskDelay(time / portTICK_PERIOD_MS);
             }
-            STORE(&KeyVars::overRideKeyAdd, false);
-            STORE(&KeyVars::record_play, false);
+            STORE(&Recording::override_key_add, false);
+            STORE(&Recording::record_play, false);
         }
     }
     
@@ -861,9 +686,8 @@ void setup() {
     xTaskCreate( serialDecoderTask, "serialDecoder", 64, NULL, 4, &serialDecoderHandle );
 
     
-    //xTaskCreate( replayCountDownTask, "replayCountDown", 32, NULL, 2, &TaskHandle::replayCountDownHandle );
 
-    xTaskCreate( replay, "record", 32, NULL, 2, &TaskHandle::replayHandle );
+    xTaskCreate( replayTask, "record", 32, NULL, 2, &TaskHandle::replayHandle );
 
 
 
@@ -871,7 +695,6 @@ void setup() {
     Mutex::key_array_mutex = xSemaphoreCreateMutex();
     Mutex::decoder_key_array_mutex = xSemaphoreCreateMutex();
     KeyVars::message_out_queue = xQueueCreate( 12, 4 );
-    KeyVars::display_q = xQueueCreate( 4, 8 );
 
     // Register DMA Callbacks
     HAL_DMA_RegisterCallback( &hdma_dac_ch1, HAL_DMA_XFER_CPLT_CB_ID, &DMA::DMA_Buffer_End_Callback);
