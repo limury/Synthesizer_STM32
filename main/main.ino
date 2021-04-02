@@ -7,6 +7,9 @@
 //#include <stm32l4xx_hal.h>
 #include "pins.h"
 
+#define LOAD(ptr) __atomic_load_n(ptr, __ATOMIC_RELAXED)
+#define STORE(ptr, val) __atomic_store_n(ptr, val, __ATOMIC_RELAXED)
+
 #define SOUND false
 #define DMA_REQUEST_DAC1_CH1 6U
 #define BUFFER_SIZE 400
@@ -187,12 +190,9 @@ namespace Sound{
     const char NOTE_NAMES[13][3] = { "C ", "C#", "D ", "D#", "E ", "F ", "F#", "G ", "G#", "A ", "A#", "B ", "  "};
     const char INT_TO_HEX[] = "0123456789ABCDEF";
 
-    const uint32_t INCREMENTS[] = {/*C*/  39903169 << 1, /*C#*/ 42275935 << 1, /*D*/  44789793 << 1, /*D#*/ 47453133 << 1,
-                                   /*E*/  50274843 << 1, /*F*/  53264341 << 1, /*F#*/ 56431603 << 1, /*G*/  59787201 << 1,
-                                   /*G#*/ 63342333 << 1, /*A*/  67108864 << 1, /*A#*/ 71099365 << 1, /*B*/  75327153 << 1};
-
-    const uint32_t SINE_WAVE_110_HZ [NSAM] = { 2147483647, 2214937738, 2282325260, 2349579710, 2416634716, 2483424102, 2549881955, 2615942690, 2681541112, 2746612484, 2811092589, 2874917791, 2938025103, 3000352247, 3061837712, 3122420821, 3182041784, 3240641762, 3298162926, 3354548509, 3409742864, 3463691521, 3516341241, 3567640063, 3617537362, 3665983896, 3712931853, 3758334902, 3802148235, 3844328614, 3884834412, 3923625655, 3960664059, 3995913074, 4029337912, 4060905587, 4090584945, 4118346697, 4144163445, 4168009712, 4189861963, 4209698633, 4227500146, 4243248934, 4256929454, 4268528206, 4278033744, 4285436685, 4290729725, 4293907640, 4294967294, 4293907640, 4290729725, 4285436685, 4278033744, 4268528206, 4256929454, 4243248934, 4227500146, 4209698633, 4189861963, 4168009712, 4144163445, 4118346697, 4090584945, 4060905587, 4029337912, 3995913074, 3960664059, 3923625655, 3884834412, 3844328614, 3802148235, 3758334902, 3712931853, 3665983896, 3617537362, 3567640063, 3516341241, 3463691521, 3409742864, 3354548509, 3298162926, 3240641762, 3182041784, 3122420821, 3061837712, 3000352247, 2938025103, 2874917791, 2811092589, 2746612484, 2681541112, 2615942690, 2549881955, 2483424102, 2416634716, 2349579710, 2282325260, 2214937738, 2147483647, 2080029555, 2012642033, 1945387583, 1878332577, 1811543191, 1745085338, 1679024603, 1613426181, 1548354809, 1483874704, 1420049502, 1356942190, 1294615046, 1233129581, 1172546472, 1112925509, 1054325531, 996804367, 940418784, 885224429, 831275772, 778626052, 727327230, 677429931, 628983397, 582035440, 536632391, 492819058, 450638679, 410132881, 371341638, 334303234, 299054219, 265629381, 234061706, 204382348, 176620596, 150803848, 126957581, 105105330, 85268660, 67467147, 51718359, 38037839, 26439087, 16933549, 9530608, 4237568, 1059653, 0, 1059653, 4237568, 9530608, 16933549, 26439087, 38037839, 51718359, 67467147, 85268660, 105105330, 126957581, 150803848, 176620596, 204382348, 234061706, 265629381, 299054219, 334303234, 371341638, 410132881, 450638679, 492819058, 536632391, 582035440, 628983397, 677429931, 727327230, 778626052, 831275772, 885224429, 940418784, 996804367, 1054325531, 1112925509, 1172546472, 1233129581, 1294615046, 1356942190, 1420049502, 1483874704, 1548354809, 1613426181, 1679024603, 1745085338, 1811543191, 1878332577, 1945387583, 2012642033, 2080029555 };
-    const uint32_t SINE_WAVE_12_BIT_256[256] = {2048, 2098, 2148, 2198, 2248, 2298, 2348, 2398, 2447, 2496, 2545, 2594, 2642, 2690, 2737, 2784, 2831, 2877, 2923, 2968, 3013, 3057, 3100, 3143, 3185, 3226, 3267, 3307, 3346, 3385, 3423, 3459, 3495, 3530, 3565, 3598, 3630, 3662, 3692, 3722, 3750, 3777, 3804, 3829, 3853, 3876, 3898, 3919, 3939, 3958, 3975, 3992, 4007, 4021, 4034, 4045, 4056, 4065, 4073, 4080, 4085, 4089, 4093, 4094, 4095, 4094, 4093, 4089, 4085, 4080, 4073, 4065, 4056, 4045, 4034, 4021, 4007, 3992, 3975, 3958, 3939, 3919, 3898, 3876, 3853, 3829, 3804, 3777, 3750, 3722, 3692, 3662, 3630, 3598, 3565, 3530, 3495, 3459, 3423, 3385, 3346, 3307, 3267, 3226, 3185, 3143, 3100, 3057, 3013, 2968, 2923, 2877, 2831, 2784, 2737, 2690, 2642, 2594, 2545, 2496, 2447, 2398, 2348, 2298, 2248, 2198, 2148, 2098, 2048, 1997, 1947, 1897, 1847, 1797, 1747, 1697, 1648, 1599, 1550, 1501, 1453, 1405, 1358, 1311, 1264, 1218, 1172, 1127, 1082, 1038, 995, 952, 910, 869, 828, 788, 749, 710, 672, 636, 600, 565, 530, 497, 465, 433, 403, 373, 345, 318, 291, 266, 242, 219, 197, 176, 156, 137, 120, 103, 88, 74, 61, 50, 39, 30, 22, 15, 10, 6, 2, 1, 0, 1, 2, 6, 10, 15, 22, 30, 39, 50, 61, 74, 88, 103, 120, 137, 156, 176, 197, 219, 242, 266, 291, 318, 345, 373, 403, 433, 465, 497, 530, 565, 600, 636, 672, 710, 749, 788, 828, 869, 910, 952, 995, 1038, 1082, 1127, 1172, 1218, 1264, 1311, 1358, 1405, 1453, 1501, 1550, 1599, 1648, 1697, 1747, 1797, 1847, 1897, 1947, 1997};
+    uint32_t SINE_WAVE_12_BIT_256[NSAM] = {2048, 2098, 2148, 2198, 2248, 2298, 2348, 2398, 2447, 2496, 2545, 2594, 2642, 2690, 2737, 2784, 2831, 2877, 2923, 2968, 3013, 3057, 3100, 3143, 3185, 3226, 3267, 3307, 3346, 3385, 3423, 3459, 3495, 3530, 3565, 3598, 3630, 3662, 3692, 3722, 3750, 3777, 3804, 3829, 3853, 3876, 3898, 3919, 3939, 3958, 3975, 3992, 4007, 4021, 4034, 4045, 4056, 4065, 4073, 4080, 4085, 4089, 4093, 4094, 4095, 4094, 4093, 4089, 4085, 4080, 4073, 4065, 4056, 4045, 4034, 4021, 4007, 3992, 3975, 3958, 3939, 3919, 3898, 3876, 3853, 3829, 3804, 3777, 3750, 3722, 3692, 3662, 3630, 3598, 3565, 3530, 3495, 3459, 3423, 3385, 3346, 3307, 3267, 3226, 3185, 3143, 3100, 3057, 3013, 2968, 2923, 2877, 2831, 2784, 2737, 2690, 2642, 2594, 2545, 2496, 2447, 2398, 2348, 2298, 2248, 2198, 2148, 2098, 2048, 1997, 1947, 1897, 1847, 1797, 1747, 1697, 1648, 1599, 1550, 1501, 1453, 1405, 1358, 1311, 1264, 1218, 1172, 1127, 1082, 1038, 995, 952, 910, 869, 828, 788, 749, 710, 672, 636, 600, 565, 530, 497, 465, 433, 403, 373, 345, 318, 291, 266, 242, 219, 197, 176, 156, 137, 120, 103, 88, 74, 61, 50, 39, 30, 22, 15, 10, 6, 2, 1, 0, 1, 2, 6, 10, 15, 22, 30, 39, 50, 61, 74, 88, 103, 120, 137, 156, 176, 197, 219, 242, 266, 291, 318, 345, 373, 403, 433, 465, 497, 530, 565, 600, 636, 672, 710, 749, 788, 828, 869, 910, 952, 995, 1038, 1082, 1127, 1172, 1218, 1264, 1311, 1358, 1405, 1453, 1501, 1550, 1599, 1648, 1697, 1747, 1797, 1847, 1897, 1947, 1997};
+    uint32_t* SQUARE_WAVE_12_BIT_256;
+    uint32_t* TRIANGLE_WAVE_12_BIT_256;
     const uint32_t SAMPLE_INCREMENTS_256[] = {/*C */ 50844943, /*C#*/ 53868341, /*D */ 57071519, /*D#*/ 60465168,
                                             /*E */ 64060614, /*F */ 67869857, /*F#*/ 71905608, /*G */ 76181338,
                                             /*G#*/ 80711316, /*A */ 85510661, /*A#*/ 90595390, /*B */ 95982472,};
@@ -200,11 +200,12 @@ namespace Sound{
 
 
 namespace KeyVars{
-    volatile uint32_t pressed_keys = 0; // each bit is 1 if key is pressed or 0 if not
-    volatile uint64_t increments[12] = {0,0,0,0,0,0,0,0,0,0,0,0,};   // pointer increments to determine how fast to iterate over buffer. these are right shifted by 32
-    volatile uint64_t decoder_increments[12] = {0,0,0,0,0,0,0,0,0,0,0,0,};
-    volatile uint8_t  knob_positions[4] = {0,0,0,0}; // position of each knob
+    volatile uint32_t pressed_keys = 0; // value with array of binary flags representing each key being pressed with 0 or 1
+    volatile uint8_t  key_array[12] = {0};
+    volatile uint8_t  volume_knob_position = 0; // position of each knob
+    volatile uint8_t  decoder_key_array[12] = {0};
     QueueHandle_t     message_out_queue;
+
     QueueHandle_t display_q;
     volatile uint8_t mute = false;
     volatile uint8_t replay_countdown = false;
@@ -212,11 +213,14 @@ namespace KeyVars{
     volatile uint8_t record_play = false;
     volatile uint8_t overRideKeyAdd = false;
     volatile uint16_t overRideKeys = 0;
+    volatile uint8_t  current_wave_idx = 0;
+
 }
 namespace Mutex{
-    SemaphoreHandle_t increments_mutex;
-    SemaphoreHandle_t decoder_increments_mutex;
+    SemaphoreHandle_t key_array_mutex;
+    SemaphoreHandle_t decoder_key_array_mutex;
 }
+
 namespace DMA {
     uint32_t* DMABuffer;                 // start of buffer for DMA pointer
     uint32_t* DMAHalfBuffPtr;            // pointer to halfway through DMA buffer
@@ -226,55 +230,96 @@ namespace DMA {
     TaskHandle_t xDMATaskHandle = NULL;  // pointer to sampleGeneratorTask as seen by freeRTOS
 
     void sampleGeneratorTask( void* pvParameters ){
-        uint32_t key_ptrs[12] = {0,0,0,0,0,0,0,0,0,0,0,0};
-        // static uint64_t key_decoder_ptrs[12] = {0,0,0,0,0,0,0,0,0,0,0,0};
-        uint64_t local_increments[12];
-        // static uint64_t local_decoder_increments[12];
-        uint32_t out_sound = 0;
+        uint32_t key_ptrs[12] = {0};
         uint32_t local_pressed_keys = 0;
+
+        uint32_t decoder_key_ptrs[12] = {0};
+        uint8_t local_decoder_key_array[12] = {0};
+
         uint8_t n_keys;
-        uint8_t expanded_pressed_keys[12];
-        uint8_t local_mute = false;
+
+        uint32_t phase_accs[12] = {0};
+        uint32_t decoder_phase_accs[12] = {0};
+
+        uint32_t* sound_waves_ptrs[4] = {NULL, Sound::SQUARE_WAVE_12_BIT_256, Sound::TRIANGLE_WAVE_12_BIT_256, Sound::SINE_WAVE_12_BIT_256};
+        uint32_t* current_sound_ptr = NULL;
 
         while(1){
             n_keys = 0;
-            local_pressed_keys = __atomic_load_n( &KeyVars::pressed_keys, __ATOMIC_RELAXED);
-            local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
-            if(local_mute)
-            {
-                local_pressed_keys = local_pressed_keys & ~0b111111111111;  
-            }
+            local_pressed_keys = LOAD( &KeyVars::pressed_keys );
+            xSemaphoreTake( Mutex::decoder_key_array_mutex, portMAX_DELAY);
+            memcpy( &local_decoder_key_array, (uint8_t*) &KeyVars::decoder_key_array, 12*sizeof(uint8_t) );
+            xSemaphoreGive( Mutex::decoder_key_array_mutex );
+
             // zero out the array
             memset( (void*) DMA::DMAModifiableBuffer, 0, sizeof(uint32_t)*HALF_BUFFER_SIZE );
-            for (uint32_t i = 0; i < 12; i++){
-                expanded_pressed_keys[i] = (local_pressed_keys >> i) & 0b1;
-            }
+            // select current wave
+            current_sound_ptr = sound_waves_ptrs[ LOAD( &KeyVars::current_wave_idx ) ];
+            if ( current_sound_ptr ){ // if !=NULL : sound comes from generator buffer
+                for (uint8_t i = 0; i < 12; i++){
+                    if ( (local_pressed_keys >> i) & 1 ){ // if key i is pressed
+                        uint32_t increment = Sound::SAMPLE_INCREMENTS_256[i]; // load the pointer increment
+                        n_keys++; // icrease key count
+                        for (uint32_t j = 0; j < HALF_BUFFER_SIZE; j++){ // for each element of the buffer that we are filling
+                            key_ptrs[i] += increment; // increment the pointer (it automatically circles around to the start by overflowing)
+                            DMA::DMAModifiableBuffer[j] += (current_sound_ptr[key_ptrs[i] >> 24]); // read the sound element
+                        }
+                    }
 
-        
-            for (uint32_t i = 0; i < 12; i++){
-                if ((local_pressed_keys >> i) & 0b1){
-                    n_keys++;
-                    uint32_t increment = Sound::SAMPLE_INCREMENTS_256[i];
-                    for (uint32_t j = 0; j < HALF_BUFFER_SIZE; j++){
-                        key_ptrs[i] += increment;
-                        DMA::DMAModifiableBuffer[j] += (Sound::SINE_WAVE_12_BIT_256[key_ptrs[i] >> 24]);
+                    if (local_decoder_key_array[i]){
+                        Serial.println((int8_t) local_decoder_key_array[i] - 5);
+                        uint32_t increment; // get phase_acc increment depending on octave
+                        if (local_decoder_key_array[i] >= 5)
+                            increment = Sound::SAMPLE_INCREMENTS_256[i] << ( local_decoder_key_array[i] - 5);
+                        else
+                            increment = Sound::SAMPLE_INCREMENTS_256[i] >> ( 5 - local_decoder_key_array[i]);
+
+                        n_keys++;
+                        for (uint32_t j = 0; j < HALF_BUFFER_SIZE; j++){
+                            decoder_key_ptrs[i] += increment;
+                            DMA::DMAModifiableBuffer[j] += (current_sound_ptr[decoder_key_ptrs[i] >> 24]);
+                        }
                     }
                 }
             }
-            if (n_keys){
-                for (uint32_t j = 0; j < HALF_BUFFER_SIZE; j++){
-                    DMA::DMAModifiableBuffer[j] = (DMA::DMAModifiableBuffer[j] >> (12 - (KeyVars::knob_positions[3]>>1)))/n_keys;
+            else { // sawtooth
+                for (uint8_t i = 0; i < 12; i++){ // for each key
+                    if ( (local_pressed_keys >> i) & 1 ){ // if key i is pressed
+                        uint32_t increment = Sound::STEP_SIZES[i]; // get the phase_acc incrementer for key i
+                        n_keys++; // increase the count of keys being played
+                        for (uint32_t j = 0; j < HALF_BUFFER_SIZE; j++){ // for each element in the half buffer
+                            phase_accs[i] += increment; // increment phase_acc of that key 
+                            DMA::DMAModifiableBuffer[j] += phase_accs[i] >> 20; // place phase_acc in the buffer to be read
+                        }
+                    }
+
+                    if (local_decoder_key_array[i]){ // if key i is being played by the serial decoder
+                        uint32_t increment;  // get phase_acc increment depending on octave
+                        if (local_decoder_key_array[i] >= 5)
+                            increment = Sound::STEP_SIZES[i] << ( local_decoder_key_array[i] - 5);
+                        else
+                            increment = Sound::STEP_SIZES[i] >> ( 5 - local_decoder_key_array[i]);
+                        n_keys++; // increase count of keys being played
+                        for (uint32_t j = 0; j < HALF_BUFFER_SIZE; j++){ // foe each element in the half buffer we are filling
+                            decoder_phase_accs[i] += increment; // update phase_acc for the decoder
+                            DMA::DMAModifiableBuffer[j] += decoder_phase_accs[i] >> 20; // palce phase_acc in the buffer 
+                        }
+                    }
                 }
             }
+            // adjust for volume
+            if (n_keys){
+                uint32_t vol_change = (12 - ( LOAD(&KeyVars::volume_knob_position)>>1));
+                for (uint32_t j = 0; j < HALF_BUFFER_SIZE; j++)
+                    DMA::DMAModifiableBuffer[j] = (DMA::DMAModifiableBuffer[j] >> vol_change)/n_keys;
+            }
 
-
+            // wait for next loop to start
             xTaskNotifyWait(pdFALSE, ULONG_MAX, NULL, portMAX_DELAY);
 
-            memcpy( (void*) __atomic_load_n( &DMA::DMACurrBuffPtr, __ATOMIC_RELAXED ), (void*) DMA::DMAModifiableBuffer, HALF_BUFFER_SIZE*sizeof(uint32_t) );
+            memcpy( (void*) LOAD( &DMA::DMACurrBuffPtr ), (void*) DMA::DMAModifiableBuffer, HALF_BUFFER_SIZE*sizeof(uint32_t) );
 
-            // this looks like it would need a semaphore to sync it since we are accessing DMA::DMALastBuffPtr twice
-            // however there is no need because if DMACurrBuffPtr is updated while doing this it would cause an error on the next loop anyway.
-            if (DMA::DMALastBuffPtr == DMA::DMACurrBuffPtr){
+            if (DMA::DMALastBuffPtr == LOAD(&DMA::DMACurrBuffPtr) ){
                 // Serial.println("Error: Out of sync DMA");
                 digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
             }
@@ -302,6 +347,15 @@ namespace DMA {
     }
 }
 
+
+namespace Recording{
+    class Recorder{
+      public:
+        Recorder(){
+
+        }
+    };
+}
 
 namespace Utils{
     // reads all bits in a certain row of the pin matrix
@@ -377,6 +431,7 @@ void scanKeysTask(void * pvParameters){
     uint32_t local_pressed_keys = 0, last_pressed_keys = 0;
     uint16_t _12keys = 0, last12keys = 0;
     uint8_t local_knob_positions[4] = {0,0,0,0}, last_knob_states[4] = {0,0,0,0}, knob_states[4] = {0,0,0,0}, knob_changes[4] = {0,0,0,0};
+
     uint8_t local_mute = false;
     uint8_t local_replay_countdown = false;
     uint8_t local_countdown = false;
@@ -385,6 +440,8 @@ void scanKeysTask(void * pvParameters){
     uint8_t record_last_keyPress = false;
     uint8_t local_overRide = false;
     uint32_t last_time_changed = 0;
+    uint8_t local_volume_knob_position = 0, last_volume_knob_state = 0, volume_knob_state = 0, volume_knob_change = 0;
+
     // setup interval timer
     const TickType_t xFrequency    = 20/portTICK_PERIOD_MS;
     TickType_t       xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
@@ -394,6 +451,7 @@ void scanKeysTask(void * pvParameters){
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
         // reading = onehot-encoded value with active keys = 1  ---------------
         local_pressed_keys = Utils::readKeys();
+
         local_countdown = __atomic_load_n( &KeyVars::replay_countdown, __ATOMIC_RELAXED);
         local_record = LOAD(&KeyVars::record);
         local_overRide = LOAD(&KeyVars::overRideKeyAdd);
@@ -405,22 +463,11 @@ void scanKeysTask(void * pvParameters){
             local_pressed_keys = local_pressed_keys | ( __atomic_load_n( &KeyVars::overRideKeys, __ATOMIC_RELAXED) & 0xFFF );
         }
 
-        __atomic_store_n( &KeyVars::pressed_keys, local_pressed_keys, __ATOMIC_RELAXED );
+        STORE( &KeyVars::pressed_keys, local_pressed_keys );
 
-        // extract knob readings ----------------------------------------------
-        for (uint8_t i = 3; i < 4; i++){
-            // decode knob value
-            knob_states[i] = (local_pressed_keys >> (12 + i*2)) & 0b11;
-            knob_changes[i] = Utils::decodeKnobChange( (last_knob_states[i] << 2) | knob_states[i], knob_changes[i] );
-            local_knob_positions[i] += knob_changes[i];
-            last_knob_states[i] = knob_states[i];
-            if (local_knob_positions[i] > 140)         local_knob_positions[i] = 0;
-            else if (local_knob_positions[i] > 24)     local_knob_positions[i] = 24;
-            // Store it in global variables
-            __atomic_store_n( &KeyVars::knob_positions[i], local_knob_positions[i], __ATOMIC_RELAXED);
-        }
+        
 
-        // set pointer increment size and update message-----------------------
+        // set pointer increment size and update message-------------------------------------------------------------
         uint32_t pressed_differences = local_pressed_keys ^ last_pressed_keys; // find differences 
         for (uint8_t i = 0; i < 12; i++){
             if ( (pressed_differences >> i) & 0b1 ){ // means there have been changes to this key
@@ -430,12 +477,14 @@ void scanKeysTask(void * pvParameters){
                     tmp_message[0] = 'P';
                 }
                 else {
-                    tmp_message[0] = 'R';}
+                    tmp_message[0] = 'R';
+                }
                 tmp_message[1] = '4';
                 tmp_message[2] = Sound::INT_TO_HEX[i];
-                // xQueueSend( KeyVars::message_out_queue, tmp_message, portMAX_DELAY );
+                xQueueSend( KeyVars::message_out_queue, tmp_message, portMAX_DELAY );
             }
         }
+
         //mute button on knob0 press
         uint8_t knob0_press = (local_pressed_keys >> 24) & 0b1;
         uint8_t prev_knob0_press = (last_pressed_keys >> 24) & 0b1;
@@ -447,7 +496,7 @@ void scanKeysTask(void * pvParameters){
         }
 
 
-        //replay 
+        //replay knob3 press
         uint8_t knob3_press = (local_pressed_keys >> 21) & 0b1;
         uint8_t prev_knob3_press = (last_pressed_keys >> 21) & 0b1;
         if(prev_knob3_press==1){
@@ -469,7 +518,8 @@ void scanKeysTask(void * pvParameters){
                 
             }
         }
-
+        
+        //recording
         if(local_record)
         { 
             _12keys = local_pressed_keys & 0xFFF;
@@ -510,12 +560,34 @@ void scanKeysTask(void * pvParameters){
             xTaskNotifyGive(TaskHandle::replayHandle);
         }
 
+
+        // extract knob readings -----------------------------------------------------------------------------------
+            // decode knob volume knob
+            volume_knob_state = (local_pressed_keys >> 18) & 0b11;
+            volume_knob_change = Utils::decodeKnobChange( (last_volume_knob_state << 2) | volume_knob_state, volume_knob_change );
+            local_volume_knob_position += volume_knob_change;
+            last_volume_knob_state = volume_knob_state;
+            if (local_volume_knob_position > 140)         local_volume_knob_position = 0;
+            else if (local_volume_knob_position > 24)     local_volume_knob_position = 24;
+            // Store it in global variables
+            __atomic_store_n( &KeyVars::volume_knob_position, local_volume_knob_position, __ATOMIC_RELAXED);
+        
+        uint8_t i = 2;
+            // decode knob value
+            knob_states[i] = (local_pressed_keys >> (12 + i*2)) & 0b11;
+            knob_changes[i] = Utils::decodeKnobChange( (last_knob_states[i] << 2) | knob_states[i], knob_changes[i] );
+            local_knob_positions[i] += knob_changes[i] * 32;
+            last_knob_states[i] = knob_states[i];
+            STORE( (uint8_t*) &KeyVars::current_wave_idx, local_knob_positions[i] >> 6 );
+
+
         last_pressed_keys = local_pressed_keys;
     }
 }
 
 void displayUpdateTask(void * pvParameters){
     uint32_t local_pressed_keys = 0;
+    const char* const sound_wave_names[] = { "Sawtooth", "Square", "Triangle", "Sine" };
     // setup interval timer
     const TickType_t xFrequency = 100/portTICK_PERIOD_MS;
     uint8_t local_mute = 0;
@@ -524,8 +596,8 @@ void displayUpdateTask(void * pvParameters){
     displayInfo_t temp ;
     
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
-        local_pressed_keys = __atomic_load_n( &KeyVars::pressed_keys, __ATOMIC_RELAXED );
-        local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
+
+        
         local_countdown = __atomic_load_n( &KeyVars::replay_countdown, __ATOMIC_RELAXED);
         // operate on display
         if(local_countdown)
@@ -537,37 +609,42 @@ void displayUpdateTask(void * pvParameters){
             
         }else
         {
+            local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
+            local_pressed_keys = LOAD( &KeyVars::pressed_keys );
             u8g2.clearBuffer();         // clear the internal memory
             u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
 
             u8g2.drawStr(2, 10, "Volume: ");
-            u8g2.setCursor(50, 10);
-            u8g2.print(__atomic_load_n( &KeyVars::knob_positions[3], __ATOMIC_RELAXED ) );
-
+            u8g2.setCursor(60, 10);
+            u8g2.print(LOAD( &KeyVars::volume_knob_position ) );
             u8g2.drawStr(2, 30, "Playing: ");
 
+            // print lowest note being played on keyboard
+            u8g2.drawStr(2, 20, "Note: ");
             if ( local_pressed_keys & 0xFFF )
                 for (uint8_t i = 0; i < 12; i++){
                     if ( (local_pressed_keys >> i) & 0b1 ){
-                        u8g2.drawStr(50, 30, Sound::NOTE_NAMES[ i ] );
+                        u8g2.drawStr(60, 20, Sound::NOTE_NAMES[ i ] );
                         break;
+                    
                     }
-                }
 
             if(!local_mute)
             {
-                u8g2.drawStr(65, 10, "Unmute");
+                u8g2.drawStr(75, 10, "Unmute");
             }else
             {
-                u8g2.drawStr(65, 10, "Mute");
+                u8g2.drawStr(75, 10, "Mute");
             }
+        
+          // print waveform being played
+          u8g2.drawStr(2, 30, "Wave: ");
+          u8g2.setCursor(60, 30);
+          u8g2.print( sound_wave_names[ LOAD(&KeyVars::current_wave_idx) ]);
+
 
             u8g2.sendBuffer();          // transfer internal memory to the display
         }
-        
-
-        
-
     }
 }
 
@@ -581,32 +658,34 @@ void msgOutTask(void * pvParameters){
 }
 
 void serialDecoderTask(void * pvParameters){
-    uint8_t it = 0;
-    uint32_t local_decoder_increments[12] = {0,0,0,0,0,0,0,0,0,0,0,0,};
+    uint64_t local_decoder_keys = 0;
+    uint8_t local_decoder_key_array[12] = {0}; // has 12 values, one per key. each value is the octave being played
     // setup interval timer
     const TickType_t xFrequency = 10/portTICK_PERIOD_MS;
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
         char in_msg[] = "xxx";
         while(Serial.available() > 0){
-            while (it < 3){
+            for (uint8_t it = 0 ; it < 3; it++)
                 in_msg[it] = Serial.read();
-                it++;
-            }
-            if ( Serial.read() == '\n' && it >= 3) {
-                it = 0;
-                break;
-            }
+
+            if ( Serial.read() != '\n' )
+                continue;
             
             if (in_msg[0] == 'P'){
-                uint8_t note = Sound::SINE_WAVE_110_HZ[ strtol( &in_msg[2], NULL, 16) ];
-                int8_t octave = ((uint8_t) in_msg[1]) - 52;
-                local_decoder_increments[ note ] = (octave >= 0) ? (Sound::INCREMENTS[ note ] << octave) : (Sound::INCREMENTS[ note ] >> -octave);
+                uint8_t note = strtol( &in_msg[2], NULL, 16); // extract note
+                int8_t octave = ((uint8_t) in_msg[1]) - 47; // extract octave + 1
+                local_decoder_key_array[ note ] = octave;
+            }
+            else if (in_msg[0] == 'R'){
+                uint8_t note = strtol( &in_msg[2], NULL, 16); // extract note
+                local_decoder_key_array[ note ] = 0; // octave = 0 means no sound
             }
         }
-        xSemaphoreTake( Mutex::decoder_increments_mutex, portMAX_DELAY ) ;
-        memcpy( (void*) KeyVars::decoder_increments, local_decoder_increments, 12*sizeof(uint32_t) );
-        xSemaphoreGive( Mutex::decoder_increments_mutex );
+        // copy key_array for the decoder
+        xSemaphoreTake( Mutex::decoder_key_array_mutex, portMAX_DELAY ) ;
+        memcpy( (void*) KeyVars::decoder_key_array, local_decoder_key_array, 12*sizeof(uint8_t) );
+        xSemaphoreGive( Mutex::decoder_key_array_mutex );
     }
 }
 
@@ -683,6 +762,19 @@ void replay(void * pvParameters){
 
 
 void setup() {
+    // Sound ---------------------------------------------------------------
+    // generate square wave
+    Sound::SQUARE_WAVE_12_BIT_256 = (uint32_t*) malloc( NSAM * sizeof(uint32_t));
+    memset( Sound::SQUARE_WAVE_12_BIT_256, 0, NSAM/2 * sizeof(uint32_t));
+    for (uint32_t i = NSAM/2; i < NSAM; i++){
+        Sound::SQUARE_WAVE_12_BIT_256[i] = 4095;}
+    
+    // generate triangle wave
+    Sound::TRIANGLE_WAVE_12_BIT_256 = (uint32_t*) malloc( NSAM * sizeof(uint32_t));
+    for (uint32_t i = 0; i < NSAM/2; i++){
+        Sound::TRIANGLE_WAVE_12_BIT_256[i] = i*4095>>7;}
+    for (uint32_t i = 0; i < NSAM/2; i++){
+        Sound::TRIANGLE_WAVE_12_BIT_256[i+128] = (128-i)*4095>>7;}
     // preliminary --------------------------------------------------------
     //Set pin directions
     pinMode(RA0_PIN, OUTPUT); pinMode(RA1_PIN, OUTPUT); pinMode(RA2_PIN, OUTPUT); pinMode(REN_PIN, OUTPUT); pinMode(OUT_PIN, OUTPUT); pinMode(OUTL_PIN, OUTPUT); pinMode(OUTR_PIN, OUTPUT); pinMode(LED_BUILTIN, OUTPUT);
@@ -698,6 +790,8 @@ void setup() {
 
     //Initialise UART
     Serial.begin(115200);
+    Serial.println( Sound::TRIANGLE_WAVE_12_BIT_256[128]);
+
 
     // DMA -----------------------------------------------------------------
     DMA::DMABuffer = (uint32_t*) malloc(BUFFER_SIZE*sizeof(uint32_t));
@@ -705,7 +799,8 @@ void setup() {
     DMA::DMACurrBuffPtr = DMA::DMABuffer;
     DMA::DMAModifiableBuffer = (uint32_t*) malloc(HALF_BUFFER_SIZE*sizeof(uint32_t)); 
     DMA::DMALastBuffPtr = NULL;
-    memset(DMA::DMABuffer, 0, BUFFER_SIZE*sizeof(uint32_t));
+    memset(DMA::DMABuffer, 2048, BUFFER_SIZE*sizeof(uint32_t));
+    KeyVars::current_wave_idx = 0;
 
     HAL_Init();
     HAL_NVIC_SetPriorityGrouping( NVIC_PRIORITYGROUP_4 );
@@ -745,8 +840,8 @@ void setup() {
 
 
     // declare mutexes and other structures
-    Mutex::increments_mutex = xSemaphoreCreateMutex();
-    Mutex::decoder_increments_mutex = xSemaphoreCreateMutex();
+    Mutex::key_array_mutex = xSemaphoreCreateMutex();
+    Mutex::decoder_key_array_mutex = xSemaphoreCreateMutex();
     KeyVars::message_out_queue = xQueueCreate( 12, 4 );
     KeyVars::display_q = xQueueCreate( 4, 8 );
 
