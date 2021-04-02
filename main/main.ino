@@ -26,7 +26,7 @@ DMA_HandleTypeDef hdma_dac_ch1;
 TIM_HandleTypeDef htim2;
 
 
-#define buffMaxSize 100
+#define buffMaxSize 1000
 class buffer{
 
 private:
@@ -37,13 +37,14 @@ private:
   uint32_t currentPointer =0;
   bool empty = true;
   bool savedEmpty = true;
+  bool full = false;
 
 public:
   
   
   ///push data in. If successfully stored then return true otherwise if full then dont store and return false.
     bool push(uint32_t value){
-        if(currentPointer  < maxSize  )
+        if(currentPointer  < maxSize -1 )
         {  
       
         if(empty){
@@ -54,10 +55,11 @@ public:
         data[currentPointer] = value;
         return true;
         
-        }else{
-        return false;
         }
-
+        else{
+            full = true;
+            return false;
+        }
     };
 
   ///returns data from head. If empty then return 0.
@@ -85,7 +87,7 @@ public:
   }
 
   uint32_t sizeOfbuffer(){
-    return currentPointer+1;
+    return currentPointer + 1;
   }
 
   uint32_t sizeOfSaved(){
@@ -101,7 +103,7 @@ public:
   }
 
   void save(){
-    saved_data_size = currentPointer+1;
+    saved_data_size = currentPointer + 1;
     savedEmpty = false;
     memcpy ( &saved_data, &data, saved_data_size * 4 );
     /*
@@ -113,6 +115,7 @@ public:
 
   void clear_buffer(){
     empty = true;
+    full = false;
     currentPointer = 0;
   }
 
@@ -540,13 +543,16 @@ void scanKeysTask(void * pvParameters){
             }else if(_12keys != last12keys)
             {
                 uint32_t time = millis();
-                record_buffer.SaveKeyPress( last12keys , time - last_time_changed ); 
+                if( !record_buffer.SaveKeyPress( last12keys , time - last_time_changed )  ){
+                    STORE(&KeyVars::record, false);
+                }
                 last_time_changed = time;
                 last12keys = _12keys;
                 
             }
         }else if(record_last_keyPress)
         {
+
             record_buffer.SaveKeyPress( last12keys, millis() - last_time_changed);        
             record_last_keyPress = false; 
             set_up = true;
@@ -766,6 +772,7 @@ void replay(void * pvParameters){
         {
             STORE(&KeyVars::overRideKeyAdd, true);
             STORE(&KeyVars::record_play, true);
+
             for(int i = 0 ; i < record_buffer.sizeOfSaved() ; i++)
             {         
                 std::tie(keys, time) = record_buffer.read_Saved_KeypressAndTime(i);
