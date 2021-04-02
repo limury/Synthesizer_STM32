@@ -247,10 +247,16 @@ namespace DMA {
         while(1){
             n_keys = 0;
             local_pressed_keys = LOAD( &KeyVars::pressed_keys );
+
             xSemaphoreTake( Mutex::decoder_key_array_mutex, portMAX_DELAY);
             memcpy( &local_decoder_key_array, (uint8_t*) &KeyVars::decoder_key_array, 12*sizeof(uint8_t) );
             xSemaphoreGive( Mutex::decoder_key_array_mutex );
 
+            if(LOAD(&KeyVars::mute))
+            {
+                local_pressed_keys = local_pressed_keys & ~0xFFF;
+            }
+            
             // zero out the array
             memset( (void*) DMA::DMAModifiableBuffer, 0, sizeof(uint32_t)*HALF_BUFFER_SIZE );
             // select current wave
@@ -505,15 +511,16 @@ void scanKeysTask(void * pvParameters){
                 
                 if(local_record)
                 {
-                    Serial.println("record ");
+                    Serial.println("record knob ");
                     local_record = false;
                     STORE(&KeyVars::record, local_record);
                 }else
                 {
-                    Serial.println("countdown 1");
-                    __atomic_store_n( &KeyVars::replay_countdown, true, __ATOMIC_RELAXED);
-                    xTaskNotifyGive(TaskHandle::replayCountDownHandle);
-                    Serial.println("countdown 2 ");
+                    Serial.println("countdown 1 knob");
+                    //__atomic_store_n( &KeyVars::replay_countdown, true, __ATOMIC_RELAXED);
+                    //xTaskNotifyGive(TaskHandle::replayCountDownHandle);
+                    __atomic_store_n( &KeyVars::record , true, __ATOMIC_RELAXED);
+                    Serial.println("countdown 2 knob ");
                 }
                 
             }
@@ -522,6 +529,7 @@ void scanKeysTask(void * pvParameters){
         //recording
         if(local_record)
         { 
+            Serial.println("record");
             _12keys = local_pressed_keys & 0xFFF;
             if(set_up)
             {
@@ -606,7 +614,7 @@ void displayUpdateTask(void * pvParameters){
             {
                 Utils::printDisplayInfo(&temp);  
             }
-            
+            Serial.println("end of display countdown");
         }else
         {
             local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
@@ -614,21 +622,24 @@ void displayUpdateTask(void * pvParameters){
             u8g2.clearBuffer();         // clear the internal memory
             u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
 
-            u8g2.drawStr(2, 10, "Volume: ");
-            u8g2.setCursor(60, 10);
+            u8g2.drawStr(2, 10, "Vol: ");
+            u8g2.setCursor(27, 10);
             u8g2.print(LOAD( &KeyVars::volume_knob_position ) );
-            u8g2.drawStr(2, 30, "Playing: ");
+            //u8g2.drawStr(2, 30, "Playing: ");
 
             // print lowest note being played on keyboard
             u8g2.drawStr(2, 20, "Note: ");
             if ( local_pressed_keys & 0xFFF )
-                for (uint8_t i = 0; i < 12; i++){
+            {
+                for (uint8_t i = 0; i < 12; i++)
+                {
                     if ( (local_pressed_keys >> i) & 0b1 ){
                         u8g2.drawStr(60, 20, Sound::NOTE_NAMES[ i ] );
                         break;
                     
                     }
-
+                }
+            }   
             if(!local_mute)
             {
                 u8g2.drawStr(75, 10, "Unmute");
@@ -637,10 +648,10 @@ void displayUpdateTask(void * pvParameters){
                 u8g2.drawStr(75, 10, "Mute");
             }
         
-          // print waveform being played
-          u8g2.drawStr(2, 30, "Wave: ");
-          u8g2.setCursor(60, 30);
-          u8g2.print( sound_wave_names[ LOAD(&KeyVars::current_wave_idx) ]);
+            // print waveform being played
+            u8g2.drawStr(2, 30, "Wave: ");
+            u8g2.setCursor(60, 30);
+            u8g2.print( sound_wave_names[ LOAD(&KeyVars::current_wave_idx) ]);
 
 
             u8g2.sendBuffer();          // transfer internal memory to the display
@@ -692,15 +703,16 @@ void serialDecoderTask(void * pvParameters){
 
 void replayCountDownTask(void * pvParameters){
     
-    const TickType_t xFrequency = 15/portTICK_PERIOD_MS;
+    const TickType_t xFrequency = 50/portTICK_PERIOD_MS;
     TickType_t xLastWakeTime = xTaskGetTickCount();
     while(1)
     {
-        vTaskDelayUntil( &xLastWakeTime, xFrequency );  
-        //uint8_t start = ulTaskNotifyTake( pdTRUE, (TickType_t) portMAX_DELAY );
-        Serial.println("count start");
+        //vTaskDelayUntil( &xLastWakeTime, xFrequency );  
+        uint8_t start = ulTaskNotifyTake( pdTRUE, (TickType_t) portMAX_DELAY );
+        //uint8_t start = LOAD(&KeyVars::replay_countdown)
+        Serial.println("count start up");
         //bool start = __atomic_load_n( &KeyVars::replay_countdown, __ATOMIC_RELAXED );
-        if(LOAD(&KeyVars::replay_countdown)){
+        if(start > 0){
             Serial.println("count start");
             displayInfo_t send = {2, 10 , '3' , 1};
 
@@ -833,7 +845,7 @@ void setup() {
     xTaskCreate( serialDecoderTask, "serialDecoder", 64, NULL, 4, &serialDecoderHandle );
 
     
-    xTaskCreate( replayCountDownTask, "replayCountDown", 32, NULL, 3, &TaskHandle::replayCountDownHandle );
+    xTaskCreate( replayCountDownTask, "replayCountDown", 32, NULL, 2, &TaskHandle::replayCountDownHandle );
 
     xTaskCreate( replay, "record", 32, NULL, 2, &TaskHandle::replayHandle );
 
