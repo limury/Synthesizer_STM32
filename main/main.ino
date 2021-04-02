@@ -606,6 +606,7 @@ void displayUpdateTask(void * pvParameters){
     uint8_t local_countdown;
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
     displayInfo_t temp;
+    int note_pos = 35;
     
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
@@ -630,15 +631,16 @@ void displayUpdateTask(void * pvParameters){
             u8g2.print(LOAD( &KeyVars::volume_knob_position ) );
             //u8g2.drawStr(2, 30, "Playing: ");
 
-            // print lowest note being played on keyboard
+            // print note being played on keyboard
             u8g2.drawStr(2, 20, "Note: ");
             if ( local_pressed_keys & 0xFFF )
             {
+                note_pos = 35;
                 for (uint8_t i = 0; i < 12; i++)
                 {
                     if ( (local_pressed_keys >> i) & 0b1 ){
-                        u8g2.drawStr(40, 20, Sound::NOTE_NAMES[ i ] );
-                        break;
+                        u8g2.drawStr(note_pos, 20, Sound::NOTE_NAMES[ i ] );
+                        note_pos += 15;
                     }
                 }
             } 
