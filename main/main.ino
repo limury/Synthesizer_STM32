@@ -29,9 +29,7 @@ TIM_HandleTypeDef htim2;
 #define RECORDING_BUFFER_MAX_SIZE 1000
 
 
-/* USER CODE BEGIN PV */
 
-/* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
@@ -507,7 +505,7 @@ void displayUpdateTask(void * pvParameters){
         u8g2.drawStr(2, 10, "Vol: ");
         u8g2.setCursor(27, 10);
         u8g2.print(LOAD( &KeyVars::volume_knob_position ) );
-        //u8g2.drawStr(2, 30, "Playing: ");
+        
 
         // print note being played on keyboard
         u8g2.drawStr(2, 20, "Note: ");
@@ -721,13 +719,11 @@ void loop() {
 
 void DMA1_Channel3_IRQHandler(void)
 {
-  /* USER CODE BEGIN DMA1_Channel3_IRQn 0 */
-  /* USER CODE END DMA1_Channel3_IRQn 0 */
+
 //   digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
   HAL_DMA_IRQHandler(&hdma_dac_ch1);
-  /* USER CODE BEGIN DMA1_Channel3_IRQn 1 */
 
-  /* USER CODE END DMA1_Channel3_IRQn 1 */
+
 }
 
 
@@ -777,15 +773,11 @@ void SystemClock_Config(void)
 static void MX_DAC1_Init(void)
 {
 
-  /* USER CODE BEGIN DAC1_Init 0 */
 
-  /* USER CODE END DAC1_Init 0 */
 
   DAC_ChannelConfTypeDef sConfig = {0};
 
-  /* USER CODE BEGIN DAC1_Init 1 */
 
-  /* USER CODE END DAC1_Init 1 */
   /** DAC Initialization
   */
   hdac1.Instance = DAC1;
@@ -804,9 +796,7 @@ static void MX_DAC1_Init(void)
   {
     myError_Handler();
   }
-  /* USER CODE BEGIN DAC1_Init 2 */
 
-  /* USER CODE END DAC1_Init 2 */
 
 }
 
@@ -818,16 +808,12 @@ static void MX_DAC1_Init(void)
 static void MX_TIM2_Init(void)
 {
 
-  /* USER CODE BEGIN TIM2_Init 0 */
 
-  /* USER CODE END TIM2_Init 0 */
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
-  /* USER CODE BEGIN TIM2_Init 1 */
 
-  /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
@@ -849,9 +835,7 @@ static void MX_TIM2_Init(void)
   {
     myError_Handler();
   }
-  /* USER CODE BEGIN TIM2_Init 2 */
 
-  /* USER CODE END TIM2_Init 2 */
 
 }
 
@@ -884,9 +868,7 @@ static void MX_GPIO_Init(void)
 
 }
 
-/* USER CODE BEGIN 4 */
 
-/* USER CODE END 4 */
 
 /**
   * @brief  This function is executed in case of error occurrence.
