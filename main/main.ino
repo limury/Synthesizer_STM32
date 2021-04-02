@@ -29,7 +29,9 @@ TIM_HandleTypeDef htim2;
 #define RECORDING_BUFFER_MAX_SIZE 1000
 
 
+/* USER CODE BEGIN PV */
 
+/* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
@@ -488,7 +490,7 @@ void displayUpdateTask(void * pvParameters){
     uint32_t local_pressed_keys = 0;
     const char* const sound_wave_names[] = { "Sawtooth", "Square", "Triangle", "Sine" };
     // setup interval timer
-    const TickType_t xFrequency = 200/portTICK_PERIOD_MS;
+    const TickType_t xFrequency = 100/portTICK_PERIOD_MS;
     uint8_t local_mute = 0;
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
     int note_pos = 35;
@@ -528,12 +530,12 @@ void displayUpdateTask(void * pvParameters){
 
         if(LOAD(&Recording::record))
         {
-            u8g2.drawStr(55, 20, "Rec");
+            u8g2.drawFilledEllipse(95,25,3,3,U8G2_DRAW_ALL);
         }
 
         if(LOAD(&Recording::record_play))
         {
-            u8g2.drawStr(85, 20, "Play");
+            u8g2.drawTriangle(105,20,105,30,110,25);
         }
         
         // print waveform being played
@@ -719,10 +721,13 @@ void loop() {
 
 void DMA1_Channel3_IRQHandler(void)
 {
-
+  /* USER CODE BEGIN DMA1_Channel3_IRQn 0 */
+  /* USER CODE END DMA1_Channel3_IRQn 0 */
 //   digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
   HAL_DMA_IRQHandler(&hdma_dac_ch1);
- 
+  /* USER CODE BEGIN DMA1_Channel3_IRQn 1 */
+
+  /* USER CODE END DMA1_Channel3_IRQn 1 */
 }
 
 
@@ -772,9 +777,15 @@ void SystemClock_Config(void)
 static void MX_DAC1_Init(void)
 {
 
+  /* USER CODE BEGIN DAC1_Init 0 */
+
+  /* USER CODE END DAC1_Init 0 */
 
   DAC_ChannelConfTypeDef sConfig = {0};
 
+  /* USER CODE BEGIN DAC1_Init 1 */
+
+  /* USER CODE END DAC1_Init 1 */
   /** DAC Initialization
   */
   hdac1.Instance = DAC1;
@@ -793,7 +804,9 @@ static void MX_DAC1_Init(void)
   {
     myError_Handler();
   }
+  /* USER CODE BEGIN DAC1_Init 2 */
 
+  /* USER CODE END DAC1_Init 2 */
 
 }
 
@@ -805,10 +818,16 @@ static void MX_DAC1_Init(void)
 static void MX_TIM2_Init(void)
 {
 
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
@@ -830,7 +849,9 @@ static void MX_TIM2_Init(void)
   {
     myError_Handler();
   }
-  
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
 
 }
 
@@ -863,6 +884,9 @@ static void MX_GPIO_Init(void)
 
 }
 
+/* USER CODE BEGIN 4 */
+
+/* USER CODE END 4 */
 
 /**
   * @brief  This function is executed in case of error occurrence.
@@ -877,7 +901,7 @@ void myError_Handler(void)
   while (1)
   {
   }
- 
+  /* USER CODE END myError_Handler_Debug */
 }
 
 #ifdef  USE_FULL_ASSERT
