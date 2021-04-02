@@ -605,7 +605,7 @@ void displayUpdateTask(void * pvParameters){
     uint8_t local_mute = 0;
     uint8_t local_countdown;
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
-    displayInfo_t temp ;
+    displayInfo_t temp;
     
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
 
@@ -639,7 +639,6 @@ void displayUpdateTask(void * pvParameters){
                     if ( (local_pressed_keys >> i) & 0b1 ){
                         u8g2.drawStr(40, 20, Sound::NOTE_NAMES[ i ] );
                         break;
-                    
                     }
                 }
             } 
