@@ -266,8 +266,8 @@ namespace Utils{
 // scan keys being pressed
 void scanKeysTask(void * pvParameters){
     uint32_t local_pressed_keys = 0, last_pressed_keys = 0;
-    uint8_t local_knob_positions[4] = {0,0,0,0}, last_knob_states[4] = {0,0,0,0}, knob_states[4] = {0,0,0,0}, knob_changes[4] = {0,0,0,0};
     uint8_t local_volume_knob_position = 0, last_volume_knob_state = 0, volume_knob_state = 0, volume_knob_change = 0;
+    uint8_t local_sound_knob_position = 0, last_sound_knob_state = 0, sound_knob_state = 0, sound_knob_change = 0;
     
 
     // setup interval timer
@@ -308,13 +308,12 @@ void scanKeysTask(void * pvParameters){
             // Store it in global variables
             __atomic_store_n( &KeyVars::volume_knob_position, local_volume_knob_position, __ATOMIC_RELAXED);
         
-        uint8_t i = 2;
             // decode knob value
-            knob_states[i] = (local_pressed_keys >> (12 + i*2)) & 0b11;
-            knob_changes[i] = Utils::decodeKnobChange( (last_knob_states[i] << 2) | knob_states[i], knob_changes[i] );
-            local_knob_positions[i] += knob_changes[i] * 32;
-            last_knob_states[i] = knob_states[i];
-            STORE( (uint8_t*) &KeyVars::current_wave_idx, local_knob_positions[i] >> 6 );
+            sound_knob_state = (local_pressed_keys >> (16)) & 0b11;
+            sound_knob_change = Utils::decodeKnobChange( (last_sound_knob_state << 2) | sound_knob_state, sound_knob_change );
+            local_sound_knob_position += sound_knob_change * 32;
+            last_sound_knob_state = sound_knob_state;
+            STORE( (uint8_t*) &KeyVars::current_wave_idx, local_sound_knob_position >> 6 );
 
         last_pressed_keys = local_pressed_keys;
     }
