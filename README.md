@@ -1,3 +1,4 @@
+
 ---
 noteId: "b5acef40864f11ebbe1f35d2d4b4ff54"
 tags: []
@@ -5,6 +6,8 @@ tags: []
 ---
 
 # Embedded_Synth
+
+## NOTE: FINAL CODE IS ON THE FINAL BRANCH, NOT ON MAIN
 ## How we are going to do polyphony and complex sounds
 
 - We are updating the voltage in the speaker at 22000 Hz.
