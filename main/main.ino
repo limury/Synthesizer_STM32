@@ -537,7 +537,7 @@ void scanKeysTask(void * pvParameters){
             {
                 set_up = false;
                 record_buffer.clear_buffer();
-                last12keys = local_pressed_keys & 0xFFF;
+                last12keys = _12keys;
                 last_time_changed = millis();
                 record_last_keyPress = true;
             }else if(_12keys != last12keys)
