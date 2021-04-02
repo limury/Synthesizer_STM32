@@ -105,9 +105,14 @@ namespace DMA {
         while(1){
             n_keys = 0;
             local_pressed_keys = LOAD( &KeyVars::pressed_keys );
-            xSemaphoreTake( Mutex::decoder_key_array_mutex, portMAX_DELAY);
-            memcpy( &local_decoder_key_array, (uint8_t*) &KeyVars::decoder_key_array, 12*sizeof(uint8_t) );
-            xSemaphoreGive( Mutex::decoder_key_array_mutex );
+
+            if (xSemaphoreTake( Mutex::decoder_key_array_mutex, 2/portTICK_PERIOD_MS)){
+                memcpy( &local_decoder_key_array, (uint8_t*) &KeyVars::decoder_key_array, 12*sizeof(uint8_t) );
+                xSemaphoreGive( Mutex::decoder_key_array_mutex );
+            }
+            else{
+                digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+            }
             // zero out the array
             memset( (void*) DMA::DMAModifiableBuffer, 0, sizeof(uint32_t)*HALF_BUFFER_SIZE );
             // select current wave
