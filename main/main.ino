@@ -36,6 +36,7 @@ private:
   int saved_data_size = 0;
   uint32_t currentPointer =0;
   bool empty = true;
+  bool savedEmpty = true;
 
 public:
   
@@ -79,6 +80,10 @@ public:
     return empty;
   }
 
+  bool isSavedEmpty(){
+      return savedEmpty;
+  }
+
   uint32_t sizeOfbuffer(){
     return currentPointer+1;
   }
@@ -97,6 +102,7 @@ public:
 
   void save(){
     saved_data_size = currentPointer+1;
+    savedEmpty = false;
     memcpy ( &saved_data, &data, saved_data_size * 4 );
     /*
     for(int i = 0 ; i < saved_data_size ; i++)
@@ -522,10 +528,12 @@ void scanKeysTask(void * pvParameters){
                     __atomic_store_n( &KeyVars::record , true, __ATOMIC_RELAXED);
                     Serial.println("countdown 2 knob ");
                 }
-                
             }
         }
         
+
+       
+
         //recording
         if(local_record)
         { 
@@ -566,6 +574,18 @@ void scanKeysTask(void * pvParameters){
             set_up = true;
             record_buffer.save();
             xTaskNotifyGive(TaskHandle::replayHandle);
+        }
+
+
+        uint8_t knob2_press = (local_pressed_keys >> 20) & 0b1;
+        uint8_t prev_knob2_press = (last_pressed_keys >> 20) & 0b1;
+        if(prev_knob2_press==1){
+            if(knob2_press==0){
+                if( !LOAD(&KeyVars::record_play) & !record_buffer.isSavedEmpty() )
+                {
+                    xTaskNotifyGive(TaskHandle::replayHandle);
+                }
+            }
         }
 
 
@@ -634,12 +654,13 @@ void displayUpdateTask(void * pvParameters){
                 for (uint8_t i = 0; i < 12; i++)
                 {
                     if ( (local_pressed_keys >> i) & 0b1 ){
-                        u8g2.drawStr(60, 20, Sound::NOTE_NAMES[ i ] );
+                        u8g2.drawStr(40, 20, Sound::NOTE_NAMES[ i ] );
                         break;
                     
                     }
                 }
-            }   
+            } 
+
             if(!local_mute)
             {
                 u8g2.drawStr(75, 10, "Unmute");
@@ -647,10 +668,20 @@ void displayUpdateTask(void * pvParameters){
             {
                 u8g2.drawStr(75, 10, "Mute");
             }
+
+            if(LOAD(&KeyVars::record))
+            {
+                u8g2.drawStr(55, 20, "Rec");
+            }
+
+            if(LOAD(&KeyVars::record_play))
+            {
+                u8g2.drawStr(85, 20, "Play");
+            }
         
             // print waveform being played
             u8g2.drawStr(2, 30, "Wave: ");
-            u8g2.setCursor(60, 30);
+            u8g2.setCursor(40, 30);
             u8g2.print( sound_wave_names[ LOAD(&KeyVars::current_wave_idx) ]);
 
 
@@ -667,6 +698,7 @@ void msgOutTask(void * pvParameters){
         Serial.println(out_msg);
     }
 }
+
 
 void serialDecoderTask(void * pvParameters){
     uint64_t local_decoder_keys = 0;
@@ -700,7 +732,7 @@ void serialDecoderTask(void * pvParameters){
     }
 }
 
-
+/*
 void replayCountDownTask(void * pvParameters){
     
     const TickType_t xFrequency = 50/portTICK_PERIOD_MS;
@@ -748,7 +780,7 @@ void replayCountDownTask(void * pvParameters){
     }
     }
 }
-
+*/
 void replay(void * pvParameters){
     uint32_t keys,time ;
     while(1){
@@ -756,6 +788,7 @@ void replay(void * pvParameters){
         if(start > 0)
         {
             STORE(&KeyVars::overRideKeyAdd, true);
+            STORE(&KeyVars::record_play, true);
             Serial.println(record_buffer.sizeOfSaved());
             for(int i = 0 ; i < record_buffer.sizeOfSaved() ; i++)
             {         
@@ -767,8 +800,10 @@ void replay(void * pvParameters){
             }
             STORE(&KeyVars::overRideKeyAdd, false);
             Serial.println("end of playing");
+            STORE(&KeyVars::record_play, false);
         }
     }
+    
 }
 
 
@@ -845,7 +880,7 @@ void setup() {
     xTaskCreate( serialDecoderTask, "serialDecoder", 64, NULL, 4, &serialDecoderHandle );
 
     
-    xTaskCreate( replayCountDownTask, "replayCountDown", 32, NULL, 2, &TaskHandle::replayCountDownHandle );
+    //xTaskCreate( replayCountDownTask, "replayCountDown", 32, NULL, 2, &TaskHandle::replayCountDownHandle );
 
     xTaskCreate( replay, "record", 32, NULL, 2, &TaskHandle::replayHandle );
 
