@@ -155,7 +155,6 @@ class ReplayBuffer : public Buffer
 
 namespace KeyVars{
     volatile uint32_t pressed_keys = 0; // value with array of binary flags representing each key being pressed with 0 or 1
-    volatile uint8_t  key_array[12] = {0};
     volatile uint8_t  volume_knob_position = 0; // position of each knob
     volatile uint8_t  decoder_key_array[12] = {0};
     QueueHandle_t     message_out_queue;
