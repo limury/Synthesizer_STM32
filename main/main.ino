@@ -361,8 +361,7 @@ namespace Utils{
 void scanKeysTask(void * pvParameters){
     uint32_t local_pressed_keys = 0, last_pressed_keys = 0;
     uint16_t first_12_keys = 0, last_12_keys = 0;
-    uint8_t local_knob_positions[4] = {0,0,0,0}, last_knob_states[4] = {0,0,0,0}, knob_states[4] = {0,0,0,0}, knob_changes[4] = {0,0,0,0};
-    uint8_t local_wave_knob_position=0, last_wave_knob_state=0, knob_wave_state=0, knob_wave_change=0;
+    uint8_t local_wave_knob_position=0, last_wave_knob_state=0, wave_knob_state=0, wave_knob_change=0;
 
     uint8_t local_mute = false;
     uint8_t is_playing_recording = false;
@@ -453,13 +452,12 @@ void scanKeysTask(void * pvParameters){
             // Store it in global variables
             STORE(&KeyVars::volume_knob_position, local_volume_knob_position);
         
-        uint8_t i = 2;
             // decode knob value
-            knob_states[i] = (local_pressed_keys >> (12 + i*2)) & 0b11;
-            knob_changes[i] = Utils::decodeKnobChange( (last_knob_states[i] << 2) | knob_states[i], knob_changes[i] );
-            local_knob_positions[i] += knob_changes[i] * 32;
-            last_knob_states[i] = knob_states[i];
-            STORE( (uint8_t*) &KeyVars::current_wave_idx, local_knob_positions[i] >> 6 );
+            wave_knob_state = (local_pressed_keys >> (16)) & 0b11;
+            wave_knob_change = Utils::decodeKnobChange( (last_wave_knob_state << 2) | wave_knob_state, wave_knob_change );
+            local_wave_knob_position += wave_knob_change * 32;
+            last_wave_knob_state = wave_knob_state;
+            STORE( (uint8_t*) &KeyVars::current_wave_idx, local_wave_knob_position >> 6 );
 
 
         last_pressed_keys = local_pressed_keys;
