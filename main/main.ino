@@ -1,14 +1,12 @@
 
 #include <U8g2lib.h>
 #include <Wire.h>
-#include <math.h>
 #include <STM32FreeRTOS.h>
 #include "src/main.h"
 //#include <stm32l4xx_hal.h>
 #include "pins.h"
 
 
-#define SOUND false
 #define DMA_REQUEST_DAC1_CH1 6U
 #define BUFFER_SIZE 400
 #define HALF_BUFFER_SIZE BUFFER_SIZE/2 
@@ -73,15 +71,16 @@ namespace Sound{
 
 namespace Mutex{
     SemaphoreHandle_t decoder_key_array_mutex;
+    SemaphoreHandle_t save_recording_mutex;
 }
 
 class Buffer{
 
   private:
-    uint32_t data[RECORDING_BUFFER_MAX_SIZE];
-    uint32_t saved_data[RECORDING_BUFFER_MAX_SIZE];
-    uint16_t saved_data_size;
-    uint16_t current_pointer;
+    uint32_t data[RECORDING_BUFFER_MAX_SIZE]; // temporary buffer
+    uint32_t saved_data[RECORDING_BUFFER_MAX_SIZE]; // saved permanent buffer
+    uint16_t saved_data_size; // size of permanent buffer (saved)
+    uint16_t current_pointer; // current location we are at in the buffer
     uint8_t empty; // flag for is buffer empty
     uint8_t saved_empty; // flag for is the permanent buffer empty
     uint8_t full; // flag for is buffer full
@@ -89,7 +88,7 @@ class Buffer{
   public:
     Buffer(): saved_data_size(0), current_pointer(0), empty(true), saved_empty(true), full(false) {}
 
-  ///push data in. If successfully stored then return true otherwise if full then dont store and return false.
+    //push data in. If successfully stored then return true otherwise if full then dont store and return false.
     bool push(uint32_t value){
         if(current_pointer  < RECORDING_BUFFER_MAX_SIZE -1 ) { 
             if (!empty)
@@ -107,14 +106,16 @@ class Buffer{
 
   bool issavedEmpty(){ return saved_empty; }
 
-  uint32_t sizeOfSaved(){ return saved_data_size; }
+  uint32_t sizeOfSaved(){ return LOAD( &saved_data_size); }
 
-  uint32_t readSavedBuffer(const uint32_t& i){ return saved_data[i]; }
+  uint32_t readSavedBuffer(const uint32_t& i){ return LOAD( &saved_data[i]); }
 
   void save(){
-    saved_data_size = current_pointer + 1;
+    xSemaphoreTake( Mutex::save_recording_mutex, portMAX_DELAY);
+    STORE(&saved_data_size, current_pointer + 1);
     saved_empty = false;
-    memcpy ( &saved_data, &data, saved_data_size * 4 );
+    memcpy ( &saved_data, &data, saved_data_size * sizeof(uint32_t) );
+    xSemaphoreGive( Mutex::save_recording_mutex);
   }
 
   void clearBuffer(){
@@ -140,6 +141,14 @@ class ReplayBuffer : public Buffer
       uint32_t value = readSavedBuffer(i);        
       val = value & 0b111111111111; 
       time = (value>>12);
+    }
+
+    uint32_t sizeofAndReadRecording( const uint32_t& i, uint32_t& keys, uint32_t& time ){
+        xSemaphoreTake( Mutex::save_recording_mutex, portMAX_DELAY); // start semaphore
+        this->readSavedKeypressAndTime(i, keys, time); // find keys and duration of press
+        uint32_t t = this->sizeOfSaved(); // find size of buffer
+        xSemaphoreGive( Mutex::save_recording_mutex );
+        return t;
     }
 
 };
@@ -194,14 +203,10 @@ namespace DMA {
             n_keys = 0;
             local_pressed_keys = LOAD( &KeyVars::pressed_keys );
 
-            if(xSemaphoreTake( Mutex::decoder_key_array_mutex, 2/portTICK_PERIOD_MS)){
-                memcpy( &local_decoder_key_array, (uint8_t*) &KeyVars::decoder_key_array, 12*sizeof(uint8_t) );
-                xSemaphoreGive( Mutex::decoder_key_array_mutex );
-            }
-            else{
-                digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-            }
-
+            xSemaphoreTake( Mutex::decoder_key_array_mutex, 2/portTICK_PERIOD_MS);
+            memcpy( &local_decoder_key_array, (uint8_t*) &KeyVars::decoder_key_array, 12*sizeof(uint8_t) );
+            xSemaphoreGive( Mutex::decoder_key_array_mutex );
+            
             if(LOAD(&KeyVars::mute))
                 local_pressed_keys = local_pressed_keys & ~0xFFF;
             
@@ -221,7 +226,6 @@ namespace DMA {
                     }
 
                     if (local_decoder_key_array[i]){
-                        Serial.println((int8_t) local_decoder_key_array[i] - 5);
                         uint32_t increment; // get phase_acc increment depending on octave
                         if (local_decoder_key_array[i] >= 5)
                             increment = Sound::SAMPLE_INCREMENTS_256[i] << ( local_decoder_key_array[i] - 5);
@@ -268,16 +272,17 @@ namespace DMA {
                     DMA::DMAModifiableBuffer[j] = (DMA::DMAModifiableBuffer[j] >> vol_change)/n_keys;
             }
 
+
             // wait for next loop to start
-            xTaskNotifyWait(pdFALSE, ULONG_MAX, NULL, portMAX_DELAY);
+            xTaskNotifyWait(pdFALSE, ULONG_MAX, NULL, portMAX_DELAY); // wait for next callback
 
-            memcpy( (void*) LOAD( &DMA::DMACurrBuffPtr ), (void*) DMA::DMAModifiableBuffer, HALF_BUFFER_SIZE*sizeof(uint32_t) );
+            memcpy( (void*) LOAD( &DMA::DMACurrBuffPtr ), (void*) DMA::DMAModifiableBuffer, HALF_BUFFER_SIZE*sizeof(uint32_t) );// copy temporary buffer to DMA Buffer
 
-            if (DMA::DMALastBuffPtr == LOAD(&DMA::DMACurrBuffPtr) ){
-                digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+
+            if (DMA::DMALastBuffPtr == LOAD(&DMA::DMACurrBuffPtr) ){ // check if out of sync. 
+                digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));   // if out of sync, toggle LED
             }
             DMA::DMALastBuffPtr = DMA::DMACurrBuffPtr;
-
         }
     }
 
@@ -367,10 +372,9 @@ void scanKeysTask(void * pvParameters){
     uint8_t local_volume_knob_position = 0, last_volume_knob_state = 0, volume_knob_state = 0, volume_knob_change = 0;
 
     // setup interval timer
-    const TickType_t xFrequency    = 20/portTICK_PERIOD_MS;
+    const TickType_t xFrequency    = 40/portTICK_PERIOD_MS;
     TickType_t       xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
     uint8_t          pressed_key_index_last = -1;
-
 
     while(1){   vTaskDelayUntil( &xLastWakeTime, xFrequency );
         // reading = onehot-encoded value with active keys = 1  ---------------
@@ -466,7 +470,7 @@ void displayUpdateTask(void * pvParameters){
     uint32_t local_pressed_keys = 0;
     const char* const sound_wave_names[] = { "Sawtooth", "Square", "Triangle", "Sine" };
     // setup interval timer
-    const TickType_t xFrequency = 100/portTICK_PERIOD_MS;
+    const TickType_t xFrequency = 200/portTICK_PERIOD_MS;
     uint8_t local_mute = 0;
     TickType_t xLastWakeTime = xTaskGetTickCount(); // gets autoupdated by xTaskDelayUntil
     int note_pos = 35;
@@ -475,7 +479,6 @@ void displayUpdateTask(void * pvParameters){
 
         
         // operate on display
-        local_mute = __atomic_load_n( &KeyVars::mute, __ATOMIC_RELAXED);
         local_pressed_keys = LOAD( &KeyVars::pressed_keys );
         u8g2.clearBuffer();         // clear the internal memory
         u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
@@ -489,7 +492,7 @@ void displayUpdateTask(void * pvParameters){
         u8g2.drawStr(2, 20, "Note: ");
         if ( local_pressed_keys & 0xFFF ) {
             note_pos = 35;
-            for (uint8_t i = 0; i < 12; i++) {
+            for (uint8_t i = 0; i < 12 && note_pos <= 65; i++) {
                 if ( (local_pressed_keys >> i) & 0b1 ){
                     u8g2.drawStr(note_pos, 20, Sound::NOTE_NAMES[ i ] );
                     note_pos += 15;
@@ -497,7 +500,7 @@ void displayUpdateTask(void * pvParameters){
             }
         } 
 
-        if(!local_mute) 
+        if(!LOAD(&KeyVars::mute)) 
             u8g2.drawStr(75, 10, "Unmuted");
         else
             u8g2.drawStr(75, 10, "Muted");
@@ -553,26 +556,26 @@ void serialDecoderTask(void * pvParameters){
                 local_decoder_key_array[ note ] = 0; // octave = 0 means no sound
             }
         }
-        // copy key_array for the decoder
+        // copy keys being played
         xSemaphoreTake( Mutex::decoder_key_array_mutex, portMAX_DELAY ) ;
         memcpy( (void*) KeyVars::decoder_key_array, local_decoder_key_array, 12*sizeof(uint8_t) );
         xSemaphoreGive( Mutex::decoder_key_array_mutex );
     }
 }
 
+
 void replayTask(void * pvParameters){
     uint32_t keys, time;
     while(1){
-        uint8_t start = ulTaskNotifyTake( pdTRUE, (TickType_t) portMAX_DELAY );
+        uint8_t start = ulTaskNotifyTake( pdTRUE, (TickType_t) portMAX_DELAY ); // wait for replay button to be pressed
         if(start > 0)
         {
-            STORE(&Recording::record_play, true);
-
-            for(int i = 0 ; i < Recording::record_buffer.sizeOfSaved() ; i++)
+            STORE(&Recording::record_play, true); 
+            
+            for(int i = 0 ; i < Recording::record_buffer.sizeofAndReadRecording(i, keys, time) ; i++) // for each saved event (event = key pressed or released)
             {         
-                Recording::record_buffer.readSavedKeypressAndTime(i, keys, time);
-                STORE( &Recording::override_keys, keys);
-                vTaskDelay(time / portTICK_PERIOD_MS);
+                STORE( &Recording::override_keys, keys); // simulate pressing the keys
+                vTaskDelay(time / portTICK_PERIOD_MS); // keep the simulated keys until the next change
             }
             STORE(&Recording::record_play, false);
         }
@@ -611,7 +614,6 @@ void setup() {
 
     //Initialise UART
     Serial.begin(115200);
-    Serial.println( Sound::TRIANGLE_WAVE_12_BIT_256[128]);
 
 
     // DMA -----------------------------------------------------------------
@@ -633,7 +635,7 @@ void setup() {
     MX_TIM2_Init();
 
     TaskHandle_t sampleGeneratorHandle = NULL;
-    xTaskCreate( DMA::sampleGeneratorTask, "sampleGenerator", 256, NULL, 9, &DMA::xDMATaskHandle );
+    xTaskCreate( DMA::sampleGeneratorTask, "sampleGenerator", 256, NULL, 4, &DMA::xDMATaskHandle );
 
     HAL_TIM_Base_Start( &htim2 );
     HAL_DAC_Start_DMA( &hdac1, DAC1_CHANNEL_1, DMA::DMABuffer, BUFFER_SIZE, DAC_ALIGN_12B_R );
@@ -651,9 +653,7 @@ void setup() {
     xTaskCreate( msgOutTask, "msgOut", 32, NULL, 2, &msgOutHandle );
 
     TaskHandle_t serialDecoderHandle = NULL;
-    xTaskCreate( serialDecoderTask, "serialDecoder", 64, NULL, 4, &serialDecoderHandle );
-
-    
+    xTaskCreate( serialDecoderTask, "serialDecoder", 64, NULL, 3, &serialDecoderHandle );
 
     xTaskCreate( replayTask, "record", 32, NULL, 2, &TaskHandle::replayHandle );
 
@@ -661,7 +661,8 @@ void setup() {
 
     // declare mutexes and other structures
     Mutex::decoder_key_array_mutex = xSemaphoreCreateMutex();
-    KeyVars::message_out_queue = xQueueCreate( 12, 4 );
+    Mutex::save_recording_mutex = xSemaphoreCreateMutex();
+    KeyVars::message_out_queue = xQueueCreate( 8, 4 );
 
     // Register DMA Callbacks
     HAL_DMA_RegisterCallback( &hdma_dac_ch1, HAL_DMA_XFER_CPLT_CB_ID, &DMA::DMA_Buffer_End_Callback);
@@ -676,12 +677,7 @@ void setup() {
 }
 
 void loop() {
-    // put your main code here, to run repeatedly:
-
-    //Update display
     while(1){
-        //digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-        //delayMicroseconds(1000000);
     }
 }
 
@@ -689,7 +685,6 @@ void loop() {
 void DMA1_Channel3_IRQHandler(void)
 {
 
-//   digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
   HAL_DMA_IRQHandler(&hdma_dac_ch1);
 
 
