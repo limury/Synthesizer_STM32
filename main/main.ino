@@ -7,8 +7,6 @@
 //#include <stm32l4xx_hal.h>
 #include "pins.h"
 
-#define LOAD(ptr) __atomic_load_n(ptr, __ATOMIC_RELAXED)
-#define STORE(ptr, val) __atomic_store_n(ptr, val, __ATOMIC_RELAXED)
 
 #define SOUND false
 #define DMA_REQUEST_DAC1_CH1 6U
@@ -73,20 +71,7 @@ namespace Sound{
                                             /*G#*/ 80711316, /*A */ 85510661, /*A#*/ 90595390, /*B */ 95982472,};
 }
 
-
-namespace KeyVars{
-    volatile uint32_t pressed_keys = 0; // value with array of binary flags representing each key being pressed with 0 or 1
-    volatile uint8_t  key_array[12] = {0};
-    volatile uint8_t  volume_knob_position = 0; // position of each knob
-    volatile uint8_t  decoder_key_array[12] = {0};
-    QueueHandle_t     message_out_queue;
-
-    volatile uint8_t mute = false;
-    volatile uint8_t  current_wave_idx = 0;
-}
-
 namespace Mutex{
-    SemaphoreHandle_t key_array_mutex;
     SemaphoreHandle_t decoder_key_array_mutex;
 }
 
@@ -97,9 +82,9 @@ class Buffer{
     uint32_t saved_data[RECORDING_BUFFER_MAX_SIZE];
     uint16_t saved_data_size;
     uint16_t current_pointer;
-    uint32_t empty;
-    uint32_t saved_empty;
-    uint32_t full;
+    uint8_t empty; // flag for is buffer empty
+    uint8_t saved_empty; // flag for is the permanent buffer empty
+    uint8_t full; // flag for is buffer full
 
   public:
     Buffer(): saved_data_size(0), current_pointer(0), empty(true), saved_empty(true), full(false) {}
@@ -158,12 +143,28 @@ class ReplayBuffer : public Buffer
     }
 
 };
+
+namespace KeyVars{
+    volatile uint32_t pressed_keys = 0; // value with array of binary flags representing each key being pressed with 0 or 1
+    volatile uint8_t  key_array[12] = {0};
+    volatile uint8_t  volume_knob_position = 0; // position of each knob
+    volatile uint8_t  decoder_key_array[12] = {0};
+    QueueHandle_t     message_out_queue;
+
+    volatile uint8_t mute = false;
+    volatile uint8_t  current_wave_idx = 0;
+}
+
 namespace Recording{
     ReplayBuffer record_buffer;
     volatile uint8_t record_play = false;
-    volatile uint8_t record = false;
+    volatile uint8_t is_recording = false;
     volatile uint8_t override_key_add = false;
     volatile uint16_t override_keys = 0;
+}
+
+namespace TaskHandle{
+    inline TaskHandle_t replayHandle = NULL;
 }
 
 namespace DMA {
@@ -281,7 +282,7 @@ namespace DMA {
     }
 
     void DMA_Buffer_End_Callback( DMA_HandleTypeDef* hdma ){
-        __atomic_store_n( &DMA::DMACurrBuffPtr, (uint32_t*) DMA::DMAHalfBuffPtr, __ATOMIC_RELAXED );
+        STORE( &DMA::DMACurrBuffPtr, (uint32_t*) DMA::DMAHalfBuffPtr);
 
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
         uint32_t ulStatusRegister;
@@ -289,7 +290,7 @@ namespace DMA {
         portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
     }
     void DMA_Buffer_Half_Callback( DMA_HandleTypeDef* hdma ){
-        __atomic_store_n( &DMA::DMACurrBuffPtr, (uint32_t*) DMA::DMABuffer, __ATOMIC_RELAXED );
+        STORE( &DMA::DMACurrBuffPtr, (uint32_t*) DMA::DMABuffer);
 
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
         uint32_t ulStatusRegister;
@@ -350,21 +351,18 @@ namespace Utils{
 
 }
 
-namespace TaskHandle{
-    inline TaskHandle_t replayHandle = NULL;
-}
 
 // scan keys being pressed
 void scanKeysTask(void * pvParameters){
     uint32_t local_pressed_keys = 0, last_pressed_keys = 0;
-    uint16_t _12keys = 0, last12keys = 0;
+    uint16_t first_12_keys = 0, last_12_keys = 0;
     uint8_t local_knob_positions[4] = {0,0,0,0}, last_knob_states[4] = {0,0,0,0}, knob_states[4] = {0,0,0,0}, knob_changes[4] = {0,0,0,0};
+    uint8_t local_wave_knob_position=0, last_wave_knob_state=0, knob_wave_state=0, knob_wave_change=0;
 
     uint8_t local_mute = false;
-    uint8_t local_record = false;
+    uint8_t is_playing_recording = false;
     uint8_t set_up = true;
     uint8_t record_last_keypress = false;
-    uint8_t local_overRide = false;
     uint32_t last_time_changed = 0;
     uint8_t local_volume_knob_position = 0, last_volume_knob_state = 0, volume_knob_state = 0, volume_knob_change = 0;
 
@@ -378,10 +376,8 @@ void scanKeysTask(void * pvParameters){
         // reading = onehot-encoded value with active keys = 1  ---------------
         local_pressed_keys = Utils::readKeys();
 
-        local_record = LOAD(&Recording::record);
-        local_overRide = LOAD(&Recording::override_key_add);
-        if(local_overRide)
-            local_pressed_keys = local_pressed_keys | ( LOAD( &Recording::override_keys ) & 0xFFF );
+        if(LOAD(&Recording::record_play)) // if we are playing back
+            local_pressed_keys = local_pressed_keys | LOAD( &Recording::override_keys ); // add the recorded keys to the played ones
 
         STORE( &KeyVars::pressed_keys, local_pressed_keys );
 
@@ -404,60 +400,42 @@ void scanKeysTask(void * pvParameters){
         //mute button on knob0 press
         uint8_t knob0_press = (local_pressed_keys >> 24) & 0b1;
         uint8_t prev_knob0_press = (last_pressed_keys >> 24) & 0b1;
-        if(prev_knob0_press==1 && knob0_press==0){
-            local_mute = LOAD( &KeyVars::mute);
-            STORE( &KeyVars::mute, !local_mute);
-        }
+        if(prev_knob0_press==1 && knob0_press==0)
+            STORE( &KeyVars::mute, !LOAD( &KeyVars::mute) );
 
-        //replay knob3 press
+        // if knob 3 pressed, switch between recording and not
         uint8_t knob3_press = (local_pressed_keys >> 21) & 0b1;
         uint8_t prev_knob3_press = (last_pressed_keys >> 21) & 0b1;
         if(prev_knob3_press==1 && knob3_press==0){
-            if(local_record) {
-                local_record = false;
-                STORE(&Recording::record, local_record);
-            }else 
-                STORE( &Recording::record , true);
-        }
+            uint8_t local_is_recording = !LOAD( &Recording::is_recording );
+            STORE( &Recording::is_recording, local_is_recording ); // toggle between recording or not recording
 
-        //recording
-        if(local_record) { 
-            _12keys = local_pressed_keys & 0xFFF;
-            if(set_up) {
-                set_up = false;
-                Recording::record_buffer.clearBuffer();
-                last12keys = _12keys;
-                last_time_changed = millis();
-                record_last_keypress = true;
-            }else if(_12keys != last12keys)
-            {
-                uint32_t time = millis();
-                if( !Recording::record_buffer.saveKeyPress( last12keys , time - last_time_changed )  ){
-                    STORE(&Recording::record, false);
-                }
-                last_time_changed = time;
-                last12keys = _12keys;
-                
+            if ( local_is_recording ){ // occurs when first entering recording phase
+                Recording::record_buffer.clearBuffer(); // clear the recording buffer
+                last_time_changed = millis(); // initialize when the last time there was a change in the keys was
             }
-        }else if(record_last_keypress) {
-            Recording::record_buffer.saveKeyPress( last12keys, millis() - last_time_changed);        
-            record_last_keypress = false; 
-            set_up = true;
-            Recording::record_buffer.save();
-            xTaskNotifyGive(TaskHandle::replayHandle);
+            else { // stopping recording
+                uint32_t _time = millis();
+                Recording::record_buffer.saveKeyPress( local_pressed_keys & 0xFFF , _time - last_time_changed );  // save the last keypress
+                Recording::record_buffer.save(); // move data from temporary buffer to permanent buffer
+                xTaskNotifyGive(TaskHandle::replayHandle); // play back the recording
+            }
+        }
+
+        // record key pressed  --------------------------------------------------------------------------------------
+        if ( LOAD(&Recording::is_recording) && (pressed_differences & 0xFFF)){ // if recording and there is a keychange
+            uint32_t _time = millis(); // get current time
+            if( !Recording::record_buffer.saveKeyPress( last_pressed_keys & 0xFFF , _time - last_time_changed )  ) // save the keypress
+                STORE(&Recording::is_recording, false); // if the buffer is full, stop recording
+            last_time_changed = _time;
         }
 
 
+        // playback -------------------------------------------------------------------------------------------------
         uint8_t knob2_press = (local_pressed_keys >> 20) & 0b1;
         uint8_t prev_knob2_press = (last_pressed_keys >> 20) & 0b1;
-        if(prev_knob2_press==1){
-            if(knob2_press==0){
-                if( !LOAD(&Recording::record_play) & !Recording::record_buffer.issavedEmpty() )
-                {
-                    xTaskNotifyGive(TaskHandle::replayHandle);
-                }
-            }
-        }
+        if(prev_knob2_press==1 && knob2_press==0 && !LOAD(&Recording::record_play) && !Recording::record_buffer.issavedEmpty() ) // if knob is pressed, and we are not playing, and the recording buffer is not empty, start the replay
+            xTaskNotifyGive(TaskHandle::replayHandle);
 
 
         // extract knob readings -----------------------------------------------------------------------------------
@@ -469,7 +447,7 @@ void scanKeysTask(void * pvParameters){
             if (local_volume_knob_position > 140)         local_volume_knob_position = 0;
             else if (local_volume_knob_position > 24)     local_volume_knob_position = 24;
             // Store it in global variables
-            __atomic_store_n( &KeyVars::volume_knob_position, local_volume_knob_position, __ATOMIC_RELAXED);
+            STORE(&KeyVars::volume_knob_position, local_volume_knob_position);
         
         uint8_t i = 2;
             // decode knob value
@@ -519,22 +497,16 @@ void displayUpdateTask(void * pvParameters){
             }
         } 
 
-        if(!local_mute) {
-            u8g2.drawStr(75, 10, "Unmute");
-        }else
-        {
-            u8g2.drawStr(75, 10, "Mute");
-        }
+        if(!local_mute) 
+            u8g2.drawStr(75, 10, "Unmuted");
+        else
+            u8g2.drawStr(75, 10, "Muted");
 
-        if(LOAD(&Recording::record))
-        {
-            u8g2.drawFilledEllipse(95,25,3,3,U8G2_DRAW_ALL);
-        }
+        if(LOAD(&Recording::is_recording))
+            u8g2.drawFilledEllipse(105,25,3,3,U8G2_DRAW_ALL);
 
         if(LOAD(&Recording::record_play))
-        {
-            u8g2.drawTriangle(105,20,105,30,110,25);
-        }
+            u8g2.drawTriangle(115,20,115,30,120,25);
         
         // print waveform being played
         u8g2.drawStr(2, 30, "Wave: ");
@@ -594,16 +566,14 @@ void replayTask(void * pvParameters){
         uint8_t start = ulTaskNotifyTake( pdTRUE, (TickType_t) portMAX_DELAY );
         if(start > 0)
         {
-            STORE(&Recording::override_key_add, true);
             STORE(&Recording::record_play, true);
 
             for(int i = 0 ; i < Recording::record_buffer.sizeOfSaved() ; i++)
             {         
                 Recording::record_buffer.readSavedKeypressAndTime(i, keys, time);
-                __atomic_store_n( &Recording::override_keys, keys, __ATOMIC_RELAXED);
+                STORE( &Recording::override_keys, keys);
                 vTaskDelay(time / portTICK_PERIOD_MS);
             }
-            STORE(&Recording::override_key_add, false);
             STORE(&Recording::record_play, false);
         }
     }
@@ -690,7 +660,6 @@ void setup() {
 
 
     // declare mutexes and other structures
-    Mutex::key_array_mutex = xSemaphoreCreateMutex();
     Mutex::decoder_key_array_mutex = xSemaphoreCreateMutex();
     KeyVars::message_out_queue = xQueueCreate( 12, 4 );
 
