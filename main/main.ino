@@ -167,7 +167,6 @@ namespace Recording{
     ReplayBuffer record_buffer;
     volatile uint8_t record_play = false;
     volatile uint8_t is_recording = false;
-    volatile uint8_t override_key_add = false;
     volatile uint16_t override_keys = 0;
 }
 
