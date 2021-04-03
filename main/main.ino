@@ -155,7 +155,6 @@ class ReplayBuffer : public Buffer
 
 namespace KeyVars{
     volatile uint32_t pressed_keys = 0; // value with array of binary flags representing each key being pressed with 0 or 1
-    volatile uint8_t  key_array[12] = {0};
     volatile uint8_t  volume_knob_position = 0; // position of each knob
     volatile uint8_t  decoder_key_array[12] = {0};
     QueueHandle_t     message_out_queue;
@@ -168,7 +167,6 @@ namespace Recording{
     ReplayBuffer record_buffer;
     volatile uint8_t record_play = false;
     volatile uint8_t is_recording = false;
-    volatile uint8_t override_key_add = false;
     volatile uint16_t override_keys = 0;
 }
 
@@ -274,7 +272,7 @@ namespace DMA {
 
 
             // wait for next loop to start
-            xTaskNotifyWait(pdFALSE, ULONG_MAX, NULL, portMAX_DELAY); // wait for next callback
+            xTaskNotifyWait(pdFALSE, ULONG_MAX, NULL, portMAX_DELAY); // wait for next interrupt 
 
             memcpy( (void*) LOAD( &DMA::DMACurrBuffPtr ), (void*) DMA::DMAModifiableBuffer, HALF_BUFFER_SIZE*sizeof(uint32_t) );// copy temporary buffer to DMA Buffer
 
