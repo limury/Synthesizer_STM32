@@ -637,6 +637,11 @@ void setup() {
     TaskHandle_t sampleGeneratorHandle = NULL;
     xTaskCreate( DMA::sampleGeneratorTask, "sampleGenerator", 256, NULL, 4, &DMA::xDMATaskHandle );
 
+    // declare mutexes and other structures
+    Mutex::decoder_key_array_mutex = xSemaphoreCreateMutex();
+    Mutex::save_recording_mutex = xSemaphoreCreateMutex();
+    KeyVars::message_out_queue = xQueueCreate( 8, 4 );
+
     HAL_TIM_Base_Start( &htim2 );
     HAL_DAC_Start_DMA( &hdac1, DAC1_CHANNEL_1, DMA::DMABuffer, BUFFER_SIZE, DAC_ALIGN_12B_R );
 
@@ -659,10 +664,6 @@ void setup() {
 
 
 
-    // declare mutexes and other structures
-    Mutex::decoder_key_array_mutex = xSemaphoreCreateMutex();
-    Mutex::save_recording_mutex = xSemaphoreCreateMutex();
-    KeyVars::message_out_queue = xQueueCreate( 8, 4 );
 
     // Register DMA Callbacks
     HAL_DMA_RegisterCallback( &hdma_dac_ch1, HAL_DMA_XFER_CPLT_CB_ID, &DMA::DMA_Buffer_End_Callback);
